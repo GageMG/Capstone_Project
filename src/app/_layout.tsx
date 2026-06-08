@@ -1,125 +1,138 @@
-import { useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
-import ExploreScreen from './explore';
-import LoginScreen from './index';
-import UploadScreen from './upload';
+import { Ionicons } from "@expo/vector-icons";
+import { Tabs } from "expo-router";
+import { Platform, StyleSheet, View } from "react-native";
 
-type Tab = 'home' | 'explore' | 'upload';
-
-export default function RootLayout() {
-  const [activeTab, setActiveTab] = useState<Tab>('home');
-
-  const renderScreen = () => {
-    switch (activeTab) {
-      case 'home':
-        return <LoginScreen />;
-      case 'explore':
-        return <ExploreScreen />;
-      case 'upload':
-        return <UploadScreen />;
-    }
-  };
-
-  return (
-    <SafeAreaProvider>
-      <View style={styles.root}>
-        {/* screen content fills all space above tab bar */}
-        <View style={styles.screenArea}>{renderScreen()}</View>
-
-        {/* Bottom Tab Bar */}
-        <SafeAreaView edges={['bottom']} style={styles.tabBarWrapper}>
-          <View style={styles.tabBar}> {/* using emojis for now since I do not have a better option for icons */}
-            <TabItem
-              label="Home"
-              icon="🏠"
-              active={activeTab === 'home'}
-              onPress={() => setActiveTab('home')}
-            />
-            <TabItem
-              label="Explore"
-              icon="🗺️"
-              active={activeTab === 'explore'}
-              onPress={() => setActiveTab('explore')}
-            />
-            <TabItem
-              label="Upload"
-              icon="📷"
-              active={activeTab === 'upload'}
-              onPress={() => setActiveTab('upload')}
-            />
-          </View>
-        </SafeAreaView>
+function TabIcon({
+  name,
+  color,
+  focused,
+  isCamera,
+}: {
+  name: keyof typeof Ionicons.glyphMap;
+  color: string;
+  focused: boolean;
+  isCamera?: boolean;
+}) {
+  if (isCamera) {
+    return (
+      <View style={[styles.cameraIconWrapper, focused && styles.cameraIconFocused]}>
+        <Ionicons name={name} size={22} color={focused ? "#fff" : "#93C5FD"} />
       </View>
-    </SafeAreaProvider>
+    );
+  }
+  return (
+    <View style={[styles.iconWrapper, focused && styles.iconFocused]}>
+      <Ionicons name={name} size={22} color={color} />
+    </View>
   );
 }
 
-function TabItem({
-  label,
-  icon,
-  active,
-  onPress,
-}: {
-  label: string;
-  icon: string;
-  active: boolean;
-  onPress: () => void;
-}) {
+export default function TabLayout() {
   return (
-    <Pressable style={styles.tabItem} onPress={onPress}>
-      <Text style={styles.tabIcon}>{icon}</Text>
-      <Text style={[styles.tabLabel, active && styles.tabLabelActive]}>{label}</Text>
-      {active && <View style={styles.activeIndicator} />}
-    </Pressable>
+    <Tabs
+      screenOptions={{
+        headerShown: false,
+        tabBarStyle: styles.tabBar,
+        tabBarActiveTintColor: "#3B82F6",
+        tabBarInactiveTintColor: "#3B4A62",
+        tabBarLabelStyle: styles.tabLabel,
+        tabBarShowLabel: true,
+      }}
+    >
+      <Tabs.Screen
+        name="gallery"
+        options={{
+          title: "Gallery",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "images" : "images-outline"}
+              color={color}
+              focused={focused}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="camera"
+        options={{
+          title: "Camera",
+          tabBarLabel: () => null,
+          tabBarIcon: ({ focused }) => (
+            <TabIcon
+              name="camera"
+              color="#fff"
+              focused={focused}
+              isCamera
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: "Settings",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "settings" : "settings-outline"}
+              color={color}
+              focused={focused}
+            />
+          ),
+        }}
+      />
+    </Tabs>
   );
 }
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#E8ECF0',
-  },
-  screenArea: {
-    flex: 1,
-  },
-  tabBarWrapper: {
-    backgroundColor: '#FFFFFF',
-    borderTopWidth: 1,
-    borderTopColor: '#DDE3EA',
-  },
   tabBar: {
-    flexDirection: 'row',
-    height: 60,
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    paddingHorizontal: 8,
-  },
-  tabItem: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 8,
-    position: 'relative',
-  },
-  tabIcon: {
-    fontSize: 20,
-    marginBottom: 2,
+    backgroundColor: "#161C27",
+    borderTopWidth: 1,
+    borderTopColor: "#1E2A40",
+    height: Platform.OS === "ios" ? 82 : 64,
+    paddingBottom: Platform.OS === "ios" ? 22 : 8,
+    paddingTop: 8,
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 20,
+    elevation: 20,
   },
   tabLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    color: '#9CA3AF',
+    fontWeight: "600",
+    letterSpacing: 0.5,
+    marginTop: 2,
   },
-  tabLabelActive: {
-    color: '#2563EB',
+  iconWrapper: {
+    width: 40,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
   },
-  activeIndicator: {
-    position: 'absolute',
-    top: 0,
-    width: 28,
-    height: 3,
-    borderRadius: 2,
-    backgroundColor: '#2563EB',
+  iconFocused: {
+    backgroundColor: "rgba(59, 130, 246, 0.12)",
+  },
+  cameraIconWrapper: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
+    backgroundColor: "#1E2A40",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: Platform.OS === "ios" ? 16 : 8,
+    borderWidth: 2,
+    borderColor: "#2A3A55",
+    shadowColor: "#3B82F6",
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  cameraIconFocused: {
+    backgroundColor: "#2563EB",
+    borderColor: "#3B82F6",
+    shadowOpacity: 0.5,
   },
 });

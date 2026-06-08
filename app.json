@@ -1,14 +1,15 @@
 {
   "expo": {
-    "name": "senior-project",
-    "slug": "senior-project",
+    "name": "CapstoneProj",
+    "slug": "CapstoneProj",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "seniorproject",
+    "scheme": "capstoneproj",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "bundleIdentifier": "com.gagegjorgjeski.CapstoneProj"
     },
     "android": {
       "adaptiveIcon": {
@@ -39,13 +40,7 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    },
-    "extra": {
-      "router": {},
-      "eas": {
-        "projectId": "b98bfb87-68ba-4963-aac8-d35f7e960657"
-      }
-    },
-    "owner": "gagegjorgjeski"
+    }
   }
 }
+
