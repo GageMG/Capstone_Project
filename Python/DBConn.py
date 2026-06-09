@@ -70,10 +70,10 @@ class SQLbuilder:
         sql = """
             INSERT INTO filter_photos (
                 photo_id, status, reason, blur_score,
-                bright_score, contrast_score, width, height, user_approved
+                bright_score, contrast_score, width, height, image_hash, user_approved
             )
             VALUES (:photo_id, :status, :reason, :blur_score,
-                    :bright_score, :contrast_score, :width, :height, :user_approved)
+                    :bright_score, :contrast_score, :width, :height, :image_hash, :user_approved)
         """
 
         values = [
@@ -86,6 +86,7 @@ class SQLbuilder:
                 "contrast_score": item.get("contrast_score", 0),
                 "width": item.get("width", 0),
                 "height": item.get("height", 0),
+                "image_hash": item.get("image_hash"),
                 "user_approved": item.get("user_approved", 0)
             }
             for item in results

@@ -1,7 +1,10 @@
 import cv2 as cv
 import numpy as np
 from pathlib import Path
+from PIL import Image
+import imagehash
 import DBConn
+import numpy as np
 
 class ImgQualFilt:
     def __init__(self, minWidth=800, minHeight=600, blurThreshold=100., darkThreshold = 45.0, brightThreshold = 215.0, contrastThreshold = 30.0):
@@ -13,8 +16,10 @@ class ImgQualFilt:
         self.contrastThres = contrastThreshold
         self.db = DBConn.SQLbuilder()
         self.db.connect()
+        self.img = None
 
-    def buildDict(self, photo_id: int, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float):
+    
+    def buildDict(self, photo_id: int, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float, imgHash: str, userApproved: int = 0):
         reasonStr = ",".join(reasons)
 
         return {"photo_id": photo_id,
@@ -24,12 +29,44 @@ class ImgQualFilt:
                 "bright_score": brightScore,
                 "contrast_score": contScore,
                 "width": width,
-                "height": height}
+                "height": height,
+                "image_hash": imgHash,
+                "user_approved": userApproved}
+    
+    def hashToStr(self, h):
+        if h is None:
+            return None
+        # already a string
+        if isinstance(h, str):
+            return h
+        # imagehash object (correct case)
+        if isinstance(h, imagehash.ImageHash):
+            return str(h)
+        # numpy array (shouldn't happen, but just in case)
+        if hasattr(h, 'flatten'):
+            return ''.join(h.flatten().astype(int).astype(str))
+        return str(h)
+
+    def strToHash(self, s):
+        if s is None:
+            return None
+        return imagehash.hex_to_hash(s)
+
+    def setImagePath(self, imgPath: str):
+        path = Path(imgPath)
+
+        if not path.exists():
+          return self.buildDict('error', ['FNF'], 101., -1, -1, -1, 0 )
+        
+        self.img = cv.imread(str(path))
 
 
     def analyzeImg(self, photoID: int, imgPath: str):
-
         path = Path(imgPath)
+
+        imgHash = self.hashImages(path)
+        imgHash = self.hashToStr(imgHash)
+        #print(imgHash)
 
         if not path.exists():
           return self.buildDict('error', ['FNF'], 101., -1, -1, -1, 0 )
@@ -73,7 +110,7 @@ class ImgQualFilt:
             status = 'approved'
             reason.append('passed_filter')
 
-        return self.buildDict(photoID, status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height)
+        return self.buildDict(photoID, status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height, imgHash)
     
     def batchRun(self, eventID: int):
         photos = self.db.getPhotos(eventID)
@@ -90,13 +127,23 @@ class ImgQualFilt:
         self.db.insertPreFilter(results)
 
         return results
+    
+    def hashImages(self, imgPath: str):
+        try:
+            hash = imagehash.phash(Image.open(imgPath))
+            #print (hash)
+            return hash
+        
+        except Exception as e:
+            print(f"Hash error: {e}")
+            return None
 
 def main():
     ts = ImgQualFilt()
 
     result2 = ts.batchRun(1)
-    for result in result2:
-        print(result)
+    #for result in result2:
+    #    print(result)
 
 if __name__ == "__main__":
     main()
