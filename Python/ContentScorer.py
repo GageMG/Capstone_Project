@@ -1,11 +1,26 @@
 from ultralytics import YOLO
 import cv2
 from pathlib import Path
+import DBConn
+
 class ContentScoring:
     def __init__(self, modelPath ="yolo26n.pt"):
         self.model = YOLO(modelPath)
+        self.db = DBConn.SQLbuilder()
+        self.db.connect()
 
-    def analyze(self, imgPath):
+    def buildDict(self, photoID: int, perCount: int, maxPerConf: float, objClass: list[str], conf: float, contScore: int):
+        objects = ",".join(objClass)
+
+        return{"photo_id": photoID,
+               "person_count": perCount,
+               "max_person_conf": maxPerConf,
+               "obj_class": objects,
+               "confidence": conf,
+                "content_score": contScore
+               }
+
+    def analyze(self, photo_id: int, imgPath: str):
         results = self.model(imgPath)
         detectedObj = []
         perCnt = 0 #person count
@@ -35,18 +50,31 @@ class ContentScoring:
         if perCnt >= 2:
             contScore += +15
 
-        print(f'People: {perCnt}\nCofidence: {conf}\nMax perConf: {maxPerCof}\nContent Score: {contScore}\nDetected Objects {detectedObj}')
-
+        classNames = [obj["class"] for obj in detectedObj]
+        #print(f'People: {perCnt}\nCofidence: {conf}\nMax perConf: {maxPerCof}\nContent Score: {contScore}\nDetected Objects {detectedObj}')
+        return(self.buildDict(photo_id, perCnt, maxPerCof, classNames,conf, contScore))
+    
     def batchRun(self, eventID):
-        print('t')
+
+        photos = self.db.getPhotos(eventID)
+
+        if photos is None:
+            return "No photos found"
+        
+        results = []
+
+        for photo in photos:
+            res = self.analyze(photo["photo_id"], photo["file_path"])
+            results.append(res)
+
+        self.db.insertContent(results)
+        return results
+
 def main():
     scorer = ContentScoring()
-    photos = Path('C:\CSI4999\Photos')
-    #for photo in photos.iterdir():
-    #    print(photo.name)
-    #    result = scorer.analyze(str(photo))
-    #    print(result)
-    scorer.analyze(str(photos))
+    f = scorer.batchRun(1)
+    print(f)
+
 
 if __name__ == "__main__":
     main()      

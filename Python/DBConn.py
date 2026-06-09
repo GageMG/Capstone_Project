@@ -62,59 +62,101 @@ class SQLbuilder:
         except SQLAlchemyError as e:
             print(f'Error Occurred: {e}')
     
-    def insertPreFilter(self, photo_id: int, dataDict: dict):
-        if photo_id is None or dataDict is None:
-            print("Missing photo_id or dataDict")
+    def insertPreFilter(self, results: list[dict]):
+        if not results:
+            print("No filter results to insert.")
             return None
 
         sql = """
             INSERT INTO filter_photos (
-                photo_id,
-                status,
-                blur_score,
-                bright_score,
-                contrast_score,
-                width,
-                height,
-                user_approved
+                photo_id, status, reason, blur_score,
+                bright_score, contrast_score, width, height, user_approved
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+            VALUES (:photo_id, :status, :reason, :blur_score,
+                    :bright_score, :contrast_score, :width, :height, :user_approved)
         """
 
-        values = (
-            photo_id,
-            dataDict.get("status", "pending"),
-            dataDict.get("blur_score", 0),
-            dataDict.get("brightness_score", 0),
-            dataDict.get("contrast_score", 0),
-            dataDict.get("width", 0),
-            dataDict.get("height", 0),
-            dataDict.get("user_approved", 0)
-        )
-
+        values = [
+            {
+                "photo_id": item.get("photo_id"),
+                "status": item.get("status", "pending"),
+                "reason": item.get("reason", ""),
+                "blur_score": item.get("blur_score", 0),
+                "bright_score": item.get("bright_score", 0),
+                "contrast_score": item.get("contrast_score", 0),
+                "width": item.get("width", 0),
+                "height": item.get("height", 0),
+                "user_approved": item.get("user_approved", 0)
+            }
+            for item in results
+        ]
         try:
-            with self.engine.begin() as connection:
-                result = connection.exec_driver_sql(sql, values)
 
-            print("Pre-filter data saved")
-            return result.lastrowid
+            with self.engine.begin() as connection:
+                connection.execute(text(sql), values)
+
+            print(f"Inserted {len(results)} pre-filter records.")
+            return True
 
         except SQLAlchemyError as e:
-            print(f"Error Occurred inserting pre-filter data: {e}")
-            return None 
+            print(f"Error occurred batch inserting pre-filter data: {e}")
+            return None
+        
+    def insertContent(self, results: list[dict]):
+        if not results:
+            print("No filter results to insert.")
+            return None
+
+
+        sql = """
+            INSERT INTO photos_content (
+                photo_id, person_count, max_person_conf,
+                obj_class, confidence, content_score
+            )
+            VALUES (:photo_id, :person_count, :max_person_conf,
+                    :obj_class, :confidence, :content_score)
+        """
+
+        values = [
+            {
+                "photo_id": item.get("photo_id"),
+                "person_count": item.get("person_count", 0),
+                "max_person_conf": item.get("max_person_conf", 0.0),
+                "obj_class": item.get("obj_class", ""),
+                "confidence": item.get("confidence", 0.0),
+                "content_score": item.get("content_score", 0)
+            }
+            for item in results
+        ]
+
+        try:
+
+            with self.engine.begin() as connection:
+                connection.execute(text(sql), values)
+
+            print(f"Inserted {len(results)} pre-filter records.")
+            return True
+
+        except SQLAlchemyError as e:
+            print(f"Error occurred batch inserting pre-filter data: {e}")
+            return None
         
     def getPhotos(self, eventID: int):
-        query = """SELECT photoID, photoURL
+        #query = """SELECT photoID, photoURL
+        #FROM photos
+        #WHERE eventID = ?"""
+
+        query = """SELECT *
         FROM photos
-        WHERE eventID = ?"""
+        WHERE event_id = ?"""
 
         try:
             with self.engine.begin() as connection:
-                result = connection.exec_driver_sql(query, eventID)
+                result = connection.exec_driver_sql(query, (eventID,))
                 rows = result.fetchall()
 
             print("Pre-filter data saved")
-            return [dict(row) for row in rows]
+            return [dict(row._mapping) for row in rows]
 
         except SQLAlchemyError as e:
             print(f"Error Occurred inserting pre-filter data: {e}")
@@ -135,6 +177,6 @@ if __name__ == "__main__":
     db = SQLbuilder()
     db.connect()
   #  db.postQRtoDB(35, "www.espn.com")
-    rows = db.selectAll('photos')
+    rows = db.selectAll('filter_photos')
     for row in rows:
         print(row)

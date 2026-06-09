@@ -11,19 +11,24 @@ class ImgQualFilt:
         self.darkThres = darkThreshold
         self.brightThres = brightThreshold
         self.contrastThres = contrastThreshold
+        self.db = DBConn.SQLbuilder()
+        self.db.connect()
 
-    def buildDict(self, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float):
+    def buildDict(self, photo_id: int, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float):
         reasonStr = ",".join(reasons)
 
-        return {"status":status,
+        return {"photo_id": photo_id,
+                "status":status,
                 "reason": reasonStr,
-                "blurScore": blurScore,
-                "brightScore": brightScore,
-                "contrastScore": contScore,
+                "blur_score": blurScore,
+                "bright_score": brightScore,
+                "contrast_score": contScore,
                 "width": width,
                 "height": height}
 
-    def analyzeImg(self, imgPath: str):
+
+    def analyzeImg(self, photoID: int, imgPath: str):
+
         path = Path(imgPath)
 
         if not path.exists():
@@ -68,16 +73,28 @@ class ImgQualFilt:
             status = 'approved'
             reason.append('passed_filter')
 
-        return self.buildDict(status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height)
+        return self.buildDict(photoID, status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height)
+    
+    def batchRun(self, eventID: int):
+        photos = self.db.getPhotos(eventID)
+        
+        if photos is None:
+            return "No photos found"
+        
+        results = []
+
+        for photo in photos:
+            res = self.analyzeImg(photo["photo_id"], photo["file_path"])
+            results.append(res)
+
+        self.db.insertPreFilter(results)
+
+        return results
 
 def main():
     ts = ImgQualFilt()
-    db = DBConn.SQLbuilder()
-    db.connect()
 
-    result = ts.analyzeImg(r"C:\Users\Micha\OneDrive\Pictures\qTcFj.jpg")
-    db.insertPreFilter(1, result)
-    result2 = db.selectAll('filter_photos')
+    result2 = ts.batchRun(1)
     for result in result2:
         print(result)
 
