@@ -18,9 +18,9 @@ class SQLbuilder:
             with self.engine.connect() as connection:
                 result = connection.execute(text("SELECT sqlite_version();"))
 
-                print("Connected to SQLite database.")
-                print("SQLite version:", result.scalar())
-                print("Database:", self.connStr)
+                #print("Connected to SQLite database.")
+                #print("SQLite version:", result.scalar())
+                #print("Database:", self.connStr)
 
                 return True
 
@@ -143,11 +143,11 @@ class SQLbuilder:
             return None
         
     def getPhotos(self, eventID: int):
-        #query = """SELECT photoID, photoURL
+        #query = """SELECT *
         #FROM photos
         #WHERE eventID = ?"""
 
-        query = """SELECT *
+        query = """SELECT photo_id, file_path
         FROM photos
         WHERE event_id = ?"""
 
@@ -162,7 +162,7 @@ class SQLbuilder:
         except SQLAlchemyError as e:
             print(f"Error Occurred inserting pre-filter data: {e}")
             return None 
-
+    
         
     def selectAll(self, table: str):
         sql = f"""
