@@ -67,6 +67,20 @@ export default function TabLayout() {
           ),
         }}
       />
+      {/* ── NEW: Upload tab ── */}
+      <Tabs.Screen
+        name="upload"
+        options={{
+          title: "Upload",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "cloud-upload" : "cloud-upload-outline"}
+              color={color}
+              focused={focused}
+            />
+          ),
+        }}
+      />
       <Tabs.Screen
         name="settings"
         options={{
