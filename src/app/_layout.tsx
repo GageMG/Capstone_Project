@@ -56,6 +56,18 @@ export default function TabLayout() {
       },
     },
     React.createElement(Tabs.Screen, {
+      name: "settings",
+      options: {
+        title: "Settings",
+        tabBarIcon: ({ color, focused }: { color: string; focused: boolean }) =>
+          React.createElement(TabIcon, {
+            name: focused ? "settings" : "settings-outline",
+            color,
+            focused,
+          }),
+      },
+    }),
+    React.createElement(Tabs.Screen, {
       name: "gallery",
       options: {
         title: "Gallery",
@@ -71,6 +83,7 @@ export default function TabLayout() {
       name: "camera",
       options: {
         title: "Camera",
+        tabBarLabelStyle: { marginLeft: 12 },
         tabBarIcon: ({ focused }: { focused: boolean }) =>
           React.createElement(TabIcon, {
             name: "camera",
@@ -92,18 +105,6 @@ export default function TabLayout() {
           }),
       },
     }),
-    React.createElement(Tabs.Screen, {
-      name: "settings",
-      options: {
-        title: "Settings",
-        tabBarIcon: ({ color, focused }: { color: string; focused: boolean }) =>
-          React.createElement(TabIcon, {
-            name: focused ? "settings" : "settings-outline",
-            color,
-            focused,
-          }),
-      },
-    })
   );
 }
 
