@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   Dimensions,
   FlatList,
   Image,
@@ -17,73 +18,20 @@ import {
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
+const API_URL = "http://127.0.0.1:8000";
 
-// ─── Sample Data
-const GALLERIES = [
-  {
-    id: "1",
-    title: "Summer Gala 2024",
-    date: "Aug 14, 2024",
-    photoCount: 48,
-    coverColor: "#1A3A6B",
-    accentColor: "#3B82F6",
-    photos: [
-      { id: "p1", uri: "https://picsum.photos/seed/gala1/400/400" },
-      { id: "p2", uri: "https://picsum.photos/seed/gala2/400/400" },
-      { id: "p3", uri: "https://picsum.photos/seed/gala3/400/400" },
-      { id: "p4", uri: "https://picsum.photos/seed/gala4/400/400" },
-      { id: "p5", uri: "https://picsum.photos/seed/gala5/400/400" },
-      { id: "p6", uri: "https://picsum.photos/seed/gala6/400/400" },
-    ],
-  },
-  {
-    id: "2",
-    title: "Product Launch",
-    date: "Oct 3, 2024",
-    photoCount: 31,
-    coverColor: "#1A4A3A",
-    accentColor: "#10B981",
-    photos: [
-      { id: "p1", uri: "https://picsum.photos/seed/launch1/400/400" },
-      { id: "p2", uri: "https://picsum.photos/seed/launch2/400/400" },
-      { id: "p3", uri: "https://picsum.photos/seed/launch3/400/400" },
-      { id: "p4", uri: "https://picsum.photos/seed/launch4/400/400" },
-    ],
-  },
-  {
-    id: "3",
-    title: "Annual Conference",
-    date: "Nov 18, 2024",
-    photoCount: 76,
-    coverColor: "#3A1A4A",
-    accentColor: "#A855F7",
-    photos: [
-      { id: "p1", uri: "https://picsum.photos/seed/conf1/400/400" },
-      { id: "p2", uri: "https://picsum.photos/seed/conf2/400/400" },
-      { id: "p3", uri: "https://picsum.photos/seed/conf3/400/400" },
-      { id: "p4", uri: "https://picsum.photos/seed/conf4/400/400" },
-      { id: "p5", uri: "https://picsum.photos/seed/conf5/400/400" },
-    ],
-  },
-  {
-    id: "4",
-    title: "Team Retreat",
-    date: "Dec 5, 2024",
-    photoCount: 22,
-    coverColor: "#4A2A1A",
-    accentColor: "#F59E0B",
-    photos: [
-      { id: "p1", uri: "https://picsum.photos/seed/retreat1/400/400" },
-      { id: "p2", uri: "https://picsum.photos/seed/retreat2/400/400" },
-      { id: "p3", uri: "https://picsum.photos/seed/retreat3/400/400" },
-    ],
-  },
-];
-
-type Gallery = (typeof GALLERIES)[0];
 type Photo = { id: string; uri: string };
+type Gallery = {
+  id: string;
+  title: string;
+  date: string;
+  photoCount: number;
+  coverColor: string;
+  accentColor: string;
+  photos: Photo[];
+};
 
-// ─── Photo Lightbox
+// Photo Lightbox
 function Lightbox({
   photos,
   startIndex,
@@ -99,20 +47,14 @@ function Lightbox({
     <Modal visible animationType="fade" statusBarTranslucent>
       <View style={lb.container}>
         <StatusBar hidden />
-
-        {/* Close */}
         <TouchableOpacity style={lb.closeBtn} onPress={onClose}>
           <Ionicons name="close" size={26} color="#F0F4FF" />
         </TouchableOpacity>
-
-        {/* Counter */}
         <View style={lb.counter}>
           <Text style={lb.counterText}>
             {current + 1} / {photos.length}
           </Text>
         </View>
-
-        {/* Photo */}
         <FlatList
           data={photos}
           horizontal
@@ -141,14 +83,9 @@ function Lightbox({
             </View>
           )}
         />
-
-        {/* Dot indicators */}
         <View style={lb.dots}>
           {photos.map((_, i) => (
-            <View
-              key={i}
-              style={[lb.dot, i === current && lb.dotActive]}
-            />
+            <View key={i} style={[lb.dot, i === current && lb.dotActive]} />
           ))}
         </View>
       </View>
@@ -157,11 +94,7 @@ function Lightbox({
 }
 
 const lb = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#050810",
-    justifyContent: "center",
-  },
+  container: { flex: 1, backgroundColor: "#050810", justifyContent: "center" },
   closeBtn: {
     position: "absolute",
     top: Platform.OS === "ios" ? 56 : 36,
@@ -184,15 +117,8 @@ const lb = StyleSheet.create({
     paddingVertical: 6,
     borderRadius: 20,
   },
-  counterText: {
-    color: "#F0F4FF",
-    fontSize: 13,
-    fontWeight: "600",
-  },
-  photo: {
-    width: SCREEN_WIDTH,
-    height: SCREEN_WIDTH,
-  },
+  counterText: { color: "#F0F4FF", fontSize: 13, fontWeight: "600" },
+  photo: { width: SCREEN_WIDTH, height: SCREEN_WIDTH },
   dots: {
     position: "absolute",
     bottom: 60,
@@ -208,13 +134,10 @@ const lb = StyleSheet.create({
     borderRadius: 3,
     backgroundColor: "rgba(255,255,255,0.3)",
   },
-  dotActive: {
-    backgroundColor: "#3B82F6",
-    width: 18,
-  },
+  dotActive: { backgroundColor: "#3B82F6", width: 18 },
 });
 
-// ─── Gallery Detail Modal
+//Gallery Detail Modal
 function GalleryDetail({
   gallery,
   onClose,
@@ -230,8 +153,6 @@ function GalleryDetail({
     <Modal visible animationType="slide">
       <View style={gd.container}>
         <StatusBar barStyle="light-content" />
-
-        {/* Header */}
         <SafeAreaView>
           <View style={gd.header}>
             <TouchableOpacity onPress={onClose} style={gd.backBtn}>
@@ -248,11 +169,7 @@ function GalleryDetail({
             />
           </View>
         </SafeAreaView>
-
-        {/* Divider */}
         <View style={[gd.divider, { backgroundColor: gallery.accentColor }]} />
-
-        {/* Grid */}
         <FlatList
           data={gallery.photos}
           numColumns={numCols}
@@ -273,8 +190,6 @@ function GalleryDetail({
             </TouchableOpacity>
           )}
         />
-
-        {/* Lightbox */}
         {lightboxIndex !== null && (
           <Lightbox
             photos={gallery.photos}
@@ -312,16 +227,8 @@ const gd = StyleSheet.create({
     fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
     letterSpacing: -0.4,
   },
-  meta: {
-    fontSize: 12,
-    color: "#5A6A85",
-    marginTop: 2,
-  },
-  accentDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
+  meta: { fontSize: 12, color: "#5A6A85", marginTop: 2 },
+  accentDot: { width: 10, height: 10, borderRadius: 5 },
   divider: {
     height: 2,
     marginHorizontal: 16,
@@ -338,7 +245,7 @@ const gd = StyleSheet.create({
   },
 });
 
-// ─── Gallery Card ────────────────────────────────────────────────────────────
+// Gallery Card
 function GalleryCard({
   gallery,
   onPress,
@@ -352,23 +259,18 @@ function GalleryCard({
       activeOpacity={0.88}
       onPress={onPress}
     >
-      {/* Cover */}
       <View style={[gc.cover, { backgroundColor: gallery.coverColor }]}>
         <Image
           source={{ uri: gallery.photos[0]?.uri }}
           style={gc.coverImage}
           resizeMode="cover"
         />
-        {/* Photo count badge */}
         <View style={[gc.badge, { backgroundColor: gallery.accentColor }]}>
           <Ionicons name="images" size={10} color="#fff" />
           <Text style={gc.badgeText}>{gallery.photoCount}</Text>
         </View>
-        {/* Accent bar */}
         <View style={[gc.accentBar, { backgroundColor: gallery.accentColor }]} />
       </View>
-
-      {/* Info */}
       <View style={gc.info}>
         <Text style={gc.cardTitle} numberOfLines={1}>
           {gallery.title}
@@ -387,16 +289,8 @@ const gc = StyleSheet.create({
     borderWidth: 1,
     borderColor: "#1E2A40",
   },
-  cover: {
-    height: CARD_WIDTH * 0.75,
-    width: "100%",
-    overflow: "hidden",
-  },
-  coverImage: {
-    width: "100%",
-    height: "100%",
-    opacity: 0.85,
-  },
+  cover: { height: CARD_WIDTH * 0.75, width: "100%", overflow: "hidden" },
+  coverImage: { width: "100%", height: "100%", opacity: 0.85 },
   badge: {
     position: "absolute",
     top: 8,
@@ -408,11 +302,7 @@ const gc = StyleSheet.create({
     paddingVertical: 4,
     borderRadius: 20,
   },
-  badgeText: {
-    color: "#fff",
-    fontSize: 10,
-    fontWeight: "700",
-  },
+  badgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
   accentBar: {
     position: "absolute",
     bottom: 0,
@@ -421,9 +311,7 @@ const gc = StyleSheet.create({
     height: 2,
     opacity: 0.7,
   },
-  info: {
-    padding: 10,
-  },
+  info: { padding: 10 },
   cardTitle: {
     fontSize: 13,
     fontWeight: "700",
@@ -431,16 +319,32 @@ const gc = StyleSheet.create({
     letterSpacing: -0.2,
     fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
   },
-  cardDate: {
-    fontSize: 11,
-    color: "#5A6A85",
-    marginTop: 2,
-  },
+  cardDate: { fontSize: 11, color: "#5A6A85", marginTop: 2 },
 });
 
-// ─── Gallery Screen ──────────────────────────────────────────────────────────
+// Gallery Screen
 export default function GalleryScreen() {
+  const [galleries, setGalleries] = useState<Gallery[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [selectedGallery, setSelectedGallery] = useState<Gallery | null>(null);
+
+  useEffect(() => {
+    const fetchGalleries = async () => {
+      try {
+        const response = await fetch(`${API_URL}/events`);
+        if (!response.ok) throw new Error("Failed to fetch galleries");
+        const data = await response.json();
+        setGalleries(data);
+      } catch (err: any) {
+        setError(err.message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchGalleries();
+  }, []);
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -458,28 +362,29 @@ export default function GalleryScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Subtitle */}
-        <Text style={styles.subtitle}>
-          {GALLERIES.length} saved events
-        </Text>
+        <Text style={styles.subtitle}>{galleries.length} saved events</Text>
 
-        {/* Grid */}
-        <ScrollView
-          showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.grid}
-        >
-          <View style={styles.row}>
-            {GALLERIES.map((gallery) => (
-              <GalleryCard
-                key={gallery.id}
-                gallery={gallery}
-                onPress={() => setSelectedGallery(gallery)}
-              />
-            ))}
-          </View>
-        </ScrollView>
+        {loading ? (
+          <ActivityIndicator color="#3B82F6" style={{ marginTop: 40 }} />
+        ) : error ? (
+          <Text style={styles.errorText}>{error}</Text>
+        ) : (
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={styles.grid}
+          >
+            <View style={styles.row}>
+              {galleries.map((gallery) => (
+                <GalleryCard
+                  key={gallery.id}
+                  gallery={gallery}
+                  onPress={() => setSelectedGallery(gallery)}
+                />
+              ))}
+            </View>
+          </ScrollView>
+        )}
 
-        {/* Detail modal */}
         {selectedGallery && (
           <GalleryDetail
             gallery={selectedGallery}
@@ -492,14 +397,8 @@ export default function GalleryScreen() {
 }
 
 const styles = StyleSheet.create({
-  safe: {
-    flex: 1,
-    backgroundColor: "#0D1117",
-  },
-  container: {
-    flex: 1,
-    backgroundColor: "#0D1117",
-  },
+  safe: { flex: 1, backgroundColor: "#0D1117" },
+  container: { flex: 1, backgroundColor: "#0D1117" },
   header: {
     flexDirection: "row",
     alignItems: "flex-end",
@@ -533,19 +432,8 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     marginBottom: 4,
   },
-  subtitle: {
-    fontSize: 13,
-    color: "#3B4A62",
-    paddingHorizontal: 24,
-    marginBottom: 20,
-  },
-  grid: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
-  },
-  row: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 12,
-  },
+  subtitle: { fontSize: 13, color: "#3B4A62", paddingHorizontal: 24, marginBottom: 20 },
+  errorText: { color: "#F87171", textAlign: "center", marginTop: 40, paddingHorizontal: 24 },
+  grid: { paddingHorizontal: 20, paddingBottom: 24 },
+  row: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
 });

@@ -1,6 +1,14 @@
 import fastapi
 import qrGen
 from pydantic import BaseModel
+import os, shutil
+from fastapi import File, UploadFile
+from typing import List
+
+#For the upload directory
+Upload_Dir = "uploads"
+os.makedirs(Upload_Dir, exist_ok=True)
+
 
 class QRRequest(BaseModel):
     eventID: int
@@ -35,3 +43,19 @@ async def readUserMe():
 @app.get('/users/{userID}')
 async def readUser(userID : str):
     return{'userID': userID}
+
+#API endpoint for the upload function
+@app.post('/upload')
+async def uploadPhotos(files: List[UploadFile] = File(...)):
+    saved = []
+    for file in files:
+        dest = os.path.join(Upload_Dir, file.filename)
+        with open(dest, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+            saved.append(file.filename)
+            return {"Uploaded": len(saved), "files": saved}
+
+@app.get('/events') 
+async def getEvent():
+    events = db.query("SELECT * FROM placeholder")  #need to have databse connect for db to work
+    return events

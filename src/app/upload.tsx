@@ -61,13 +61,44 @@ export default function UploadScreen() {
       { text: "Clear", style: "destructive", onPress: () => setPhotos([]) },
     ]);
 
-  // ── Upload handler — swap setTimeout for your real API call ──
+  // to handle api call
   const handleUpload = async () => {
     setUploading(true);
-    await new Promise((r) => setTimeout(r, 1800));
-    setUploading(false);
-    setDone(true);
-    setPhotos([]);
+    try {
+      const formData = new FormData();
+  
+      formData.append("token", "QR_TOKEN_HERE"); //MAKE SURE TO ADD OUR QR TOKEN HERE
+  
+      photos.forEach((photo, index) => {
+        formData.append("files", {
+          uri: photo.uri,
+          name: `photo_${index}.jpg`,
+          type: "image/jpeg",
+        } as any);
+      });
+  
+      const response = await fetch("https://zealous-stone-0f78c580f.7.azurestaticapps.net/upload", {
+        method: "POST",
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+        body: formData,
+      });
+  
+      if (!response.ok) {
+        const err = await response.json();
+        throw new Error(err.detail ?? "Upload failed");
+      }
+  
+      const result = await response.json();
+      console.log(`Uploaded ${result.uploaded} photos`);
+      setDone(true);
+      setPhotos([]);
+    } catch (error: any) {
+      Alert.alert("Upload Failed", error.message ?? "Please try again.");
+    } finally {
+      setUploading(false);
+    }
   };
 
   return (
