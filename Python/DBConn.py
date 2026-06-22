@@ -1,80 +1,90 @@
-from pathlib import Path
-from sqlalchemy import create_engine, text
-from sqlalchemy.exc import SQLAlchemyError
-
+import os
+from supabase import create_client, Client
+from dotenv import load_dotenv
+from ProjectHelper import Helpers as ph
 
 class SQLbuilder:
     def __init__(self):
-        db_path = Path("C:/CSI4999/supra_protege.db")
+        load_dotenv()
 
-        if not db_path.exists(): 
-            raise FileNotFoundError(f"Database file not found: {db_path}")
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.service_key = os.getenv("SUPABASE_SERVICE_ROLE_KEY")
 
-        self.connStr = f"sqlite:///{db_path.as_posix()}"
-        self.engine = create_engine(self.connStr, echo=True, future=True)
+        if not self.supabase_url or not self.service_key:
+            raise ValueError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables")
+
+        self.client: Client = create_client(self.supabase_url, self.service_key)
 
     def connect(self):
         try:
-            with self.engine.connect() as connection:
-                result = connection.execute(text("SELECT sqlite_version();"))
-
-                #print("Connected to SQLite database.")
-                #print("SQLite version:", result.scalar())
-                #print("Database:", self.connStr)
-
-                return True
-
-        except SQLAlchemyError as error:
+            # Simple lightweight call to confirm the client can reach Supabase
+            self.client.table("photos").select("photo_id").limit(1).execute()
+            return True
+        except Exception as error:
             print("Connection failed:", error)
             return False
+
+    def insertToDB(self, values, table: str = "Basic"):
+        """
+        Generic insert helper.
+        values: a single dict OR a list of dicts representing row(s) to insert.
+        """
+        try:
+            result = self.client.table(table).insert(values).execute()
+            count = len(values) if isinstance(values, list) else 1
+            print(f"Saved {count} row(s) to {table}")
+            return result.data
+
+        except Exception as e:
+            print(f"Error inserting into {table}: {e}")
+            return None
 
     def postQRtoDB(self, eventID: int, url: str, token: str, expires_at: str, max_upload: int, purpose: str, is_active: bool):
         if eventID is None or url is None:
             print('Missing Values in arguments')
             return None
-        sql = """INSERT into qrcodes(event_id, image_url, token, expires_at, max_uploads, purpose, is_active)
-        VALUES  (?,?,?,?,?,?,?)"""
 
-        try:
-            with self.engine.begin() as connection:
-                connection.exec_driver_sql(sql, (eventID, url, token, expires_at, max_upload, purpose, is_active))
+        table = 'qrcodes'
+        values = {
+            "event_id": eventID,
+            "image_url": url,
+            "token": token,
+            "expires_at": expires_at,
+            "max_uploads": max_upload,
+            "purpose": purpose,
+            "is_active": is_active
+        }
 
-            print('QR Saved')
-
-        except SQLAlchemyError as e:
-            print(f'Error Occurred: {e}')
+        return self.insertToDB(values, table)
 
     def getQRToken(self, token: str):
         if token is None or token.strip() == "":
             return False, "Missing Token"
-        
-        query = """SELECT * FROM qrcodes WHERE token = ?"""
+
         try:
-            with self.engine.connect() as conn:
-                result = conn.exec_driver_sql(query, (token.strip(),))
-                row = result.mappings().first()
+            result = (
+                self.client.table("qrcodes")
+                .select("*")
+                .eq("token", token.strip())
+                .execute()
+            )
 
-                if row is None:
-                    return None
+            rows = result.data
+            if not rows:
+                return None
 
-            return dict(row)
-                
-        except SQLAlchemyError as e:
+            return rows[0]
+
+        except Exception as e:
             print(f'Error Occurred: {e}')
-    
+            return None
+
     def insertPreFilter(self, results: list[dict]):
         if not results:
             print("No filter results to insert.")
             return None
 
-        sql = """
-            INSERT INTO filter_photos (
-                photo_id, status, reason, blur_score,
-                bright_score, contrast_score, width, height, image_hash, user_approved
-            )
-            VALUES (:photo_id, :status, :reason, :blur_score,
-                    :bright_score, :contrast_score, :width, :height, :image_hash, :user_approved)
-        """
+        table = 'filter_photos'
 
         values = [
             {
@@ -87,36 +97,21 @@ class SQLbuilder:
                 "width": item.get("width", 0),
                 "height": item.get("height", 0),
                 "image_hash": item.get("image_hash"),
+                "photo_original_date": ph.formatTimeStamps(item.get("photo_original_date")),
+                "camera_model": item.get("camera_model"),
+                "gps": item.get("gps"),
                 "user_approved": item.get("user_approved", 0)
             }
             for item in results
         ]
-        try:
+        return self.insertToDB(values, table)
 
-            with self.engine.begin() as connection:
-                connection.execute(text(sql), values)
-
-            print(f"Inserted {len(results)} pre-filter records.")
-            return True
-
-        except SQLAlchemyError as e:
-            print(f"Error occurred batch inserting pre-filter data: {e}")
-            return None
-        
     def insertContent(self, results: list[dict]):
         if not results:
             print("No filter results to insert.")
             return None
 
-
-        sql = """
-            INSERT INTO photos_content (
-                photo_id, person_count, max_person_conf,
-                obj_class, confidence, content_score
-            )
-            VALUES (:photo_id, :person_count, :max_person_conf,
-                    :obj_class, :confidence, :content_score)
-        """
+        table = 'photos_content'
 
         values = [
             {
@@ -131,223 +126,201 @@ class SQLbuilder:
         ]
 
         try:
-
-            with self.engine.begin() as connection:
-                connection.execute(text(sql), values)
-
-            print(f"Inserted {len(results)} pre-filter records.")
+            self.client.table(table).insert(values).execute()
             return True
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             print(f"Error occurred batch inserting pre-filter data: {e}")
             return None
-        
+
     def getPhotos(self, eventID: int):
-        #query = """SELECT *
-        #FROM photos
-        #WHERE eventID = ?"""
-
-        query = """SELECT photo_id, file_path
-        FROM photos
-        WHERE event_id = ?"""
-
         try:
-            with self.engine.begin() as connection:
-                result = connection.exec_driver_sql(query, (eventID,))
-                rows = result.fetchall()
+            result = (
+                self.client.table("photos")
+                .select("photo_id, file_path")
+                .eq("event_id", eventID)
+                .execute()
+            )
 
             print("Pre-filter data saved")
-            return [dict(row._mapping) for row in rows]
+            return result.data
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             print(f"Error Occurred inserting pre-filter data: {e}")
-            return None 
-    
-    def insertImageRanking(self, dataDict: dict):
+            return None
+
+    def insertImageRanking(self, dataDict: list[dict]):
         if dataDict is None:
             print("Missing image ranking data")
             return None
 
-        sql = """
-            INSERT INTO image_ranking (
-                caption,mood_label,mood_conf_score,all_mood_labels,keyword_score,
-                keywords,nudity_check,all_mood_scores,photo_id)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-        """
+        table = 'image_ranking'
 
-        values = (
-            dataDict.get("caption", ""),
-            dataDict.get("mood_label", ""),
-            dataDict.get("mood_conf_score", 0),
-            dataDict.get("all_mood_labels", ""),
-            dataDict.get("keyword_score", 0),
-            dataDict.get("keywords", ""),
-            dataDict.get("nudity_check", 0),
-            dataDict.get("all_mood_scores", ""),
-            dataDict.get("photo_id")
-        )
+        values = [{
+            "caption": item.get("caption", ""),
+            "mood_label": item.get("mood_label", ""),
+            "mood_conf_score": item.get("mood_conf_score", 0),
+            "all_mood_labels": item.get("all_mood_labels", ""),
+            "keyword_score": item.get("keyword_score", 0),
+            "keywords": item.get("keywords", ""),
+            "nudity_check": item.get("nudity_check", 0),
+            "all_mood_scores": item.get("all_mood_scores", ""),
+            "photo_id": item.get("photo_id")
+        } for item in dataDict]
 
-        try:
-            with self.engine.begin() as connection:
-                result = connection.exec_driver_sql(sql, values)
-
-            print("Image ranking data saved")
-            return result.lastrowid
-
-        except SQLAlchemyError as e:
-            print(f"Error occurred inserting image ranking data: {e}")
-            return None
+        return self.insertToDB(values, table)
 
     def selectAll(self, table: str):
-        sql = f"""
-        SELECT *
-        FROM {table}
-        """
-
-        with self.engine.connect() as conn:
-            result = conn.exec_driver_sql(sql)
-            return result.fetchall()
+        try:
+            result = self.client.table(table).select("*").execute()
+            return result.data
+        except Exception as e:
+            print(f"Error selecting all from {table}: {e}")
+            return None
 
     def getApprovedPhotosForStoryboard(self, eventID: int):
         if eventID is None:
             print("Missing eventID")
             return []
 
-        sql = """
-            SELECT 
-                p.photo_id,
-                p.event_id,
-                p.file_path,
-                p.photo_taken,
-                p.created_at,
-
-                f.status,
-                f.blur_score,
-                f.bright_score,
-                f.contrast_score,
-
-                c.person_count,
-                c.max_person_conf,
-                c.obj_class,
-                c.content_score
-
-            FROM photos p
-            INNER JOIN filter_photos f 
-                ON p.photo_id = f.photo_id
-
-            LEFT JOIN photos_content c 
-                ON p.photo_id = c.photo_id
-
-            WHERE p.event_id = ?
-            AND f.status = 'approved'
-
-            ORDER BY p.photo_taken ASC;
-        """
-
         try:
-            with self.engine.begin() as connection:
-                result = connection.exec_driver_sql(sql, (eventID,))
-                rows = result.fetchall()
+            # Supabase/PostgREST can't do this exact multi-join + OR + COALESCE-order-by
+            # in one fluent call, so we use an RPC call to a Postgres function instead.
+            # See the matching SQL function `get_approved_photos_for_storyboard`
+            # provided below this file to create it once in Supabase's SQL editor.
+            result = self.client.rpc(
+                "get_approved_photos_for_storyboard",
+                {"p_event_id": eventID}
+            ).execute()
 
-            return [dict(row._mapping) for row in rows]
+            return result.data or []
 
-        except SQLAlchemyError as e:
+        except Exception as e:
             print(f"Error getting approved photos for storyboard: {e}")
             return []
 
-    def insertStoryboardItems(self, eventID: int, storyboardRows: list, replaceExisting: bool = True):
-
-        if eventID is None:
-            print("Missing eventID")
-            return False
-
-        if not storyboardRows:
-            print("No storyboard rows to insert")
-            return False
-
-        insert_sql = """
-            INSERT INTO storyboard_items (
-                event_id,
-                photo_id,
-                sequence_order,
-                scene_label,
-                confidence,
-                reason
-            )
-            VALUES (?, ?, ?, ?, ?, ?);
-        """
-
-        delete_sql = """
-            DELETE FROM storyboard_items
-            WHERE event_id = ?;
-        """
+    def insertStoryboardItems(self, event_id: int, storyboard_items: list[dict]):
+        if not storyboard_items:
+            print("No storyboard items to insert.")
+            return None
 
         values = []
 
-        for row in storyboardRows:
-            values.append((
-                eventID,
-                row.get("photo_id"),
-                row.get("sequence_order"),
-                row.get("scene_label", "unknown"),
-                row.get("confidence", 0),
-                row.get("reason", "")
-            ))
+        for index, item in enumerate(storyboard_items, start=1):
+            values.append({
+                "event_id": event_id,
+                "photo_id": item.get("photo_id"),
+                "sequence_order": index,
+                "scene_label": item.get("scene_label", "unknown"),
+                "confidence": item.get("confidence", 0),
+                "reason": item.get("reason", "")
+            })
+
+        print("Storyboard rows being inserted:")
+        for row in values:
+            print(row["event_id"], row["photo_id"], row["sequence_order"])
 
         try:
-            with self.engine.begin() as connection:
+            response = (
+                self.client
+                .table("storyboard_items")
+                .insert(values)
+                .execute()
+            )
 
-                # Optional: clears old storyboard for this event before inserting the new one
-                if replaceExisting:
-                    connection.exec_driver_sql(delete_sql, (eventID,))
+            print(f"Inserted {len(values)} storyboard items.")
+            return response
 
-                # Inserts all rows in one transaction
-                connection.exec_driver_sql(insert_sql, values)
-
-            print("Storyboard items inserted successfully")
-            return True
-
-        except SQLAlchemyError as e:
+        except Exception as e:
             print(f"Error inserting storyboard items: {e}")
-            return False  
-        
+            return None
+
     def getStoryboardByEvent(self, eventID: int):
         if eventID is None:
             print("Missing eventID")
             return []
 
-        sql = """
-            SELECT
-                s.storyboard_id,
-                s.event_id,
-                s.photo_id,
-                s.sequence_order,
-                COALESCE(s.scene_label, 'General Event Moment') AS scene_label,
-                COALESCE(s.confidence, 0) AS confidence,
-                COALESCE(s.reason, '') AS reason,
-                p.file_path
-            FROM storyboard_items s
-            INNER JOIN photos p
-                ON s.photo_id = p.photo_id
-            WHERE s.event_id = ?
-            ORDER BY s.sequence_order ASC;
-        """
-
         try:
-            with self.engine.begin() as connection:
-                result = connection.exec_driver_sql(sql, (eventID,))
-                rows = result.fetchall()
+            # Join storyboard_items -> photos via Supabase's nested select syntax.
+            # Requires a foreign key from storyboard_items.photo_id -> photos.photo_id
+            result = (
+                self.client.table("storyboard_items")
+                .select(
+                    "storyboard_id, event_id, photo_id, sequence_order, "
+                    "scene_label, confidence, reason, "
+                    "photos(file_path)"
+                )
+                .eq("event_id", eventID)
+                .order("sequence_order", desc=False)
+                .execute()
+            )
 
-            return [dict(row._mapping) for row in rows]
+            rows = result.data or []
+
+            # Flatten nested photos.file_path and apply COALESCE-style defaults in Python,
+            # since PostgREST doesn't support COALESCE directly in select().
+            cleaned = []
+            for row in rows:
+                photo = row.pop("photos", None) or {}
+                row["file_path"] = photo.get("file_path")
+                row["scene_label"] = row.get("scene_label") or "General Event Moment"
+                row["confidence"] = row.get("confidence") or 0
+                row["reason"] = row.get("reason") or ""
+                cleaned.append(row)
+
+            return cleaned
 
         except Exception as e:
             print(f"Error getting storyboard: {e}")
             return []
 
+    def insertMusic(self, title: str, fileName: str, filePath: str, artist: str = None, eventType: str = "general",
+                     moodLabel: str = "general", durationSeconds: float = 0, source: str = "local file",
+                     licenseType: str = "project testing", isActive: bool = True):
+        table = 'music'
+
+        values = {
+            "title": title,
+            "artist": artist,
+            "event_type": eventType,
+            "mood_label": moodLabel,
+            "file_name": fileName,
+            "file_path": filePath,
+            "duration_seconds": durationSeconds,
+            "source": source,
+            "license_type": licenseType,
+            "is_active": isActive
+        }
+        return self.insertToDB(values, table)
+
+    def insertGeneratedVideo(self, eventID: int, fileName: str, filePath: str, musicID: int = None,
+                              title: str = "Final Event Video", videoType: str = "slideshow",
+                              status: str = "completed", durationSeconds: float = 0, width: int = 1280,
+                              height: int = 720, fps: int = 30, fileSize: int = 0):
+        table = 'generated_videos'
+
+        values = {
+            "event_id": eventID,
+            "music_id": musicID,
+            "title": title,
+            "file_name": fileName,
+            "file_path": filePath,
+            "video_type": videoType,
+            "status": status,
+            "duration_seconds": durationSeconds,
+            "width": width,
+            "height": height,
+            "fps": fps,
+            "file_size": fileSize
+        }
+        return self.insertToDB(values, table)
+
+
 if __name__ == "__main__":
     db = SQLbuilder()
-    db.connect()
-  #  db.postQRtoDB(35, "www.espn.com")
+    if db.connect():
+        print("Connected to Supabase.")
+
     rows = db.selectAll('storyboard_items')
-    for row in rows:
+    for row in rows or []:
         print(row)

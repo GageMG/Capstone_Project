@@ -184,7 +184,34 @@ def main():
                     musicPath=musicPath,
                     outPutPath=finalVideoPath
                 )
+                musicID = db.insertMusic(
+    title="Wedding Background Track",
+    fileName="jonasblakewood-wedding-519603.mp3",
+    filePath=r"C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3",
+    artist="Jonas Blakewood",
+    eventType="general",
+    moodLabel="warm",
+    durationSeconds=0,
+    source="local file",
+    licenseType="project testing",
+    isActive=True
+)
 
+                print(f"Inserted music_id: {musicID}")
+                db.insertGeneratedVideo(
+    eventID=1,
+    fileName=Path(finalVideoPath).name,
+    filePath=finalVideoPath,
+    musicID=1,
+    title="Event 1 Final Slideshow",
+    videoType="slideshow",
+    status="completed",
+    durationSeconds=0,
+    width=1280,
+    height=720,
+    fps=30,
+    fileSize=Path(finalVideoPath).stat().st_size
+)
                 print(f"Final video created: {finalVideoPath}")
             else:
                 print(f"Music file not found: {musicPath}")

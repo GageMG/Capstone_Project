@@ -5,6 +5,7 @@ from PIL import Image
 import imagehash
 import DBConn
 import numpy as np
+from ProjectHelper import Helpers as ph
 
 class ImgQualFilt:
     def __init__(self, minWidth=800, minHeight=600, blurThreshold=100., darkThreshold = 45.0, brightThreshold = 215.0, contrastThreshold = 30.0):
@@ -19,8 +20,12 @@ class ImgQualFilt:
         self.img = None
 
     
-    def buildDict(self, photo_id: int, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float, imgHash: str, userApproved: int = 0):
-        reasonStr = ",".join(reasons)
+    def buildDict(self, photo_id: int, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float, 
+                  imgHash: str, model: str, gps: str, photoOriginalDate: str, userApproved: int = 0):
+        if reasons:
+            reasonStr = ",".join(reasons)
+        else:
+            reasonStr = "N/A"
 
         return {"photo_id": photo_id,
                 "status":status,
@@ -31,6 +36,9 @@ class ImgQualFilt:
                 "width": width,
                 "height": height,
                 "image_hash": imgHash,
+                "camera_model": model,
+                "gps": gps,
+                "photo_original_date": photoOriginalDate,
                 "user_approved": userApproved}
     
     def hashToStr(self, h):
@@ -60,6 +68,9 @@ class ImgQualFilt:
         
         self.img = cv.imread(str(path))
 
+    def errorDict(self, photoID):
+        return self.buildDict(photoID,"error",["FNF"],101.0,-1,-1,0,0,None)
+        
 
     def analyzeImg(self, photoID: int, imgPath: str):
         path = Path(imgPath)
@@ -69,12 +80,13 @@ class ImgQualFilt:
         #print(imgHash)
 
         if not path.exists():
-          return self.buildDict('error', ['FNF'], 101., -1, -1, -1, 0 )
+          return self.errorDict(photoID)
         
         img = cv.imread(str(path))
 
+        md = ph.getMetaData(path) #metadata
         if img is None:
-            return self.buildDict('error', ['ERROR'],10., -1, -1, -1, 0, 0 )
+            return self.errorDict(photoID)
         
         singleColor = np.all(img == img[0,0])
         height, width = img.shape[:2]
@@ -105,12 +117,13 @@ class ImgQualFilt:
             ('low_contrast')
 
         if len(reason) > 0:
-            status = 'issues'
+            status = 'rejected'
         else:
             status = 'approved'
             reason.append('passed_filter')
 
-        return self.buildDict(photoID, status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height, imgHash)
+        return self.buildDict(photoID, status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height, imgHash,
+                              md["camera_model"], md["gps"], md["photo_original_date"])
     
     def batchRun(self, eventID: int):
         photos = self.db.getPhotos(eventID)

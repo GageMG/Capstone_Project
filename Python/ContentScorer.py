@@ -1,6 +1,4 @@
 from ultralytics import YOLO
-import cv2
-from pathlib import Path
 import DBConn
 
 class ContentScoring:
@@ -72,8 +70,8 @@ class ContentScoring:
 
 def main():
     scorer = ContentScoring()
-    f = scorer.batchRun(1)
-    print(f)
+    scorer.batchRun(1)
+   # print(f)
 
 
 if __name__ == "__main__":

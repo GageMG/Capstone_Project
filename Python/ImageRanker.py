@@ -3,14 +3,16 @@ import torch
 from transformers import (BlipProcessor, BlipForConditionalGeneration, pipeline)
 import os
 import DBConn
+import re
 
 class blipRanker():
     def __init__(self):
         self.device = self.selectDevice()
-        self.blipProc = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+        self.hf_token = os.getenv("HF_TOKEN")
+        self.blipProc = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base",token=self.hf_token)
         self.blipModel = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
         self.blipModel.to(self.device)
-        self.clipClassify = pipeline(task="zero-shot-image-classification",model="openai/clip-vit-base-patch32")
+        self.clipClassify = pipeline(task="zero-shot-image-classification",model="openai/clip-vit-base-patch32", token=self.hf_token)
         self.db = DBConn.SQLbuilder()
         self.db.connect()
 
@@ -62,7 +64,7 @@ class blipRanker():
 
         print(f"keyword_score: {score}, matched_keyword: {matched}")
 
-        return {"keyword_score": score, "matched_keyword": matched}
+        return {"score": score, "keyword": matched}
     
     def captionImg(self, img: str):
         input = self.blipProc(img, return_tensors="pt").to(self.device)
@@ -76,8 +78,36 @@ class blipRanker():
         return capt
     
     def classifyMood(self, img: str):
-        labels = ["a romantic wedding photo","a fun group photo", "a formal ceremony photo",
-            "a candid emotional photo", "a photo of food or decorations", "a low quality random photo", "nudity"]
+        labels =  labels = [
+        # Wedding / event scene types
+        "a formal ceremony photo",
+        "a reception party photo",
+        "a cocktail hour photo",
+        "a professional portrait photo",
+        "a couple portrait photo",
+        "a family portrait photo",
+        "a wedding party group photo",
+        "a first dance photo",
+        "a speech or toast photo",
+        "a cake cutting photo",
+        "a photo of food or decorations",
+        "a venue or room detail photo",
+        "a dance floor photo",
+        "a guest candid photo",
+
+        # Emotional / mood labels
+        "a romantic emotional photo",
+        "a joyful celebration photo",
+        "a funny candid photo",
+        "a sentimental emotional photo",
+        "a calm intimate photo",
+        "an energetic party photo",
+
+        # Bad / reject labels
+        "a blurry low quality photo",
+        "a random irrelevant photo",
+        "nudity"
+    ]
         
         res = self.clipClassify(img, candidate_labels = labels)
         best = res[0]
@@ -85,34 +115,115 @@ class blipRanker():
         return best 
     
     def romanticScorePhotos(self, caption: str):
+        if not caption:
+            return {
+                "score": 0,
+                "matched_keywords": []
+            }
 
-        keywords = {"bride": 15,
+        caption = caption.lower()
+
+        keywords = {
+            # Strong romantic moments
+            "kiss": 30,
+            "kissing": 30,
+            "first kiss": 35,
+            "holding hands": 30,
+            "hand in hand": 30,
+            "first dance": 35,
+            "slow dancing": 30,
+            "dancing together": 30,
+            "embracing": 25,
+            "hugging": 20,
+            "hug": 15,
+            "forehead kiss": 35,
+            "looking at each other": 25,
+            "smiling at each other": 25,
+
+            # Couple-related
+            "bride": 15,
             "groom": 15,
-            "couple": 20,
-            "kiss": 25,
-            "kissing": 25,
-            "hugging": 15,
-            "dancing": 15,
-            "holding hands": 25,
+            "couple": 25,
+            "newlyweds": 30,
+            "husband and wife": 30,
+            "wedding couple": 30,
+            "bride and groom": 35,
+            "partner": 10,
+            "spouse": 10,
+
+            # Wedding scene moments
             "wedding": 10,
-            "first dance": 30,
-            "couple": 10,
-            "cutting cake": 15
+            "ceremony": 15,
+            "altar": 15,
+            "vows": 25,
+            "exchanging vows": 30,
+            "rings": 20,
+            "wedding rings": 25,
+            "walking down the aisle": 25,
+            "aisle": 15,
+            "reception": 10,
+            "cake cutting": 15,
+            "cutting cake": 15,
+            "bouquet": 10,
+            "veil": 10,
+
+            # Emotional / romantic mood
+            "romantic": 30,
+            "intimate": 25,
+            "emotional": 20,
+            "sweet": 15,
+            "tender": 20,
+            "loving": 25,
+            "joyful": 15,
+            "happy couple": 25,
+            "special moment": 20,
+            "celebrating love": 25,
+
+            # Visual style that often fits slideshow romance
+            "portrait": 10,
+            "close up": 10,
+            "close-up": 10,
+            "sunset": 15,
+            "golden hour": 20,
+            "flowers": 10,
+            "candles": 10,
+            "decorations": 5
         }
 
-        """score = 0
-        matched = []
-        
-        for word, points in keywords.items():
-            if word in caption:
-                score += points
-                matched.append(word)
-        
-        score = min(score, 100)
+        negative_keywords = {
+            "food": -10,
+            "table": -5,
+            "plates": -10,
+            "random": -25,
+            "blurry": -30,
+            "low quality": -40,
+            "dark": -15,
+            "nudity": -100,
+            "nude": -100,
+            "bathroom": -40,
+            "parking lot": -20
+        }
 
-        print(f"keyword_score: {score}, matched_keyword: {matched}")"""
-        score = self.scorePhotos(caption, keywords)
-        return score
+        score = 0
+        matched = []
+
+        # Add romantic/wedding points
+        for phrase, points in keywords.items():
+            if re.search(rf"\b{re.escape(phrase)}\b", caption):
+                score += points
+                matched.append(phrase)
+
+        # Subtract bad/random-photo points
+        for phrase, points in negative_keywords.items():
+            if re.search(rf"\b{re.escape(phrase)}\b", caption):
+                score += points
+                matched.append(phrase)
+
+        score = max(0, min(score, 100))
+
+        print(f"keyword_score: {score}, matched_keywords: {matched}")
+
+        return {"score": score,"keywords": matched}
 
     
     def analyze(self, eventID):
@@ -152,7 +263,7 @@ class blipRanker():
 
                     print(f"Scoring skipped: {moodLabel}")
             else:
-                scoreResult  = self.romanticScorePhotos(img)
+                scoreResult  = self.romanticScorePhotos(caption)
 
                 if isinstance(scoreResult, (int, float)):
                     keywordScore = float(scoreResult)
@@ -160,7 +271,7 @@ class blipRanker():
 
 
                 elif isinstance(scoreResult, dict):
-                    keywordScore = float(scoreResult.get("keyword_score", 0))
+                    keywordScore = float(scoreResult.get("score", 0))
                     keywords = scoreResult.get("keywords", [])
         
             dataDict = self.buildDict(
@@ -175,21 +286,13 @@ class blipRanker():
                 nudityCheck=nudityCheck
             )
 
-            ranking_id = self.db.insertImageRanking(dataDict)
+            #ranking_id = self.db.insertImageRanking(dataDict)
 
-            results.append({
-                "photo_id": photo_id,
-                "ranking_id": ranking_id,
-                "caption": caption,
-                "mood_label": moodLabel,
-                "keyword_score": keywordScore,
-                "nudity_check": nudityCheck
-            })
-
+            results.append(dataDict)
+        self.db.insertImageRanking(results)
         return results
         
 def main():
-    print(os.getenv("HF_TOKEN"))
     test = blipRanker()
     test.analyze(1)
 

@@ -5,7 +5,8 @@ from pathlib import Path
 class ExtractVidFrames():
     def __init__(self):
         pass
-
+    
+        
     def extractFrames(self, inPath: str, outPath: str, eventID: int, setSeconds: int= 3):
 
         vidPath = Path(inPath)

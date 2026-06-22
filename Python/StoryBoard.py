@@ -1,11 +1,16 @@
 from datetime import datetime, timedelta
 import DBConn
+import ProjectHelper
+import llavaRanker
+from pathlib import Path
 
 class StoryBoardGen():
     def __init__(self, eventTimeGap):
         self.eventTimeGap = 20
         self.db = DBConn.SQLbuilder()
         self.db.connect()
+        self.PH = ProjectHelper.Helpers()
+        self.LV = llavaRanker.llavaTool()
 
     def parseTime(self, value):
         if value is None:
@@ -18,14 +23,12 @@ class StoryBoardGen():
         except ValueError:
             return None
         
-    def classifyScene(self, row:dict):
+    def classifyScene(self, row: dict):
         personCount = row.get("person_count", 0) or 0
-        objClass = row.get('obj_class') or ''
-        contentScore = row.get('content_score', 0) or 0
+        objClass = row.get("obj_class") or ""
+        contentScore = row.get("content_score", 0) or 0
 
-        objClass = row.get('content_score', 0) or 0
-
-        if objClass is str:
+        if isinstance(objClass, str):
             objClass = objClass.lower()
 
         if personCount >= 5:
@@ -34,8 +37,8 @@ class StoryBoardGen():
         if personCount == 2:
             return "Couple / Small Group Moment", 0.70, "Two people detected"
 
-        #if "dining table" in objClass or "chair" in objClass:
-        #    return "Reception / Seating Area", 0.65, "Tables or chairs detected"
+        if "dining table" in objClass or "chair" in objClass:
+            return "Reception / Seating Area", 0.65, "Tables or chairs detected"
 
         if contentScore >= 70:
             return "Highlight Moment", 0.70, "High content score"
@@ -45,13 +48,29 @@ class StoryBoardGen():
 
         return "General Event Moment", 0.50, "Default scene classification"
 
+    def findDuplicates(self, temp: list):
+        dupes = []
+
+        for i in range(len(temp) - 1):
+            hash1 = temp [i]["image_hash"]
+            hash2 = temp [i+1]["image_hash"]
+            truth = self.PH.findDuplicateImage(hash1, hash2)
+            print(f'Photo_id:{temp[i]["photo_id"]} Hash1: {hash1} vs. phot_id: {temp[i + 1]["photo_id"]} Hash2: {hash2} Result: {truth}')
+            if truth:
+                dupes.append(temp[i + 1]["photo_id"])
+        return dupes
+    
+
     def generateSeq(self, photos: list[dict]):
         board = []
         currentgroup = []
         lastTime = None
         seqOrder = 1
+        skip = self.findDuplicates(photos)
 
         for photo in photos:
+            if photo["photo_id"] in skip:
+                continue
             photoTime = self.parseTime(photo.get("photo_taken"))
 
             if lastTime is None:
@@ -80,6 +99,18 @@ class StoryBoardGen():
 
         for photo in group:
             sceneLabel, confidence, reason = self.classifyScene(photo)
+            photo_id = photo.get("photo_id")
+            file_path = photo.get("file_path")
+
+            # if not file_path or not Path(file_path).is_file():
+            #     print(f"Skipping LLaVA for photo_id {photo_id}: invalid file path: {file_path}")
+            #     llava_result = None
+            # else:
+            #     llava_result = self.LV.sendPromptBatch( "wedding",
+            #         photo_id=photo_id,
+            #         file_path=file_path
+            #     )
+
 
             output.append({"photo_id": photo['photo_id'], "event_id": photo['event_id'], 'sequence_order': sequenceOrder,
             'scene_label': sceneLabel, 'confidence': confidence, "reason": reason, 'file_path': photo['file_path']})
@@ -88,70 +119,14 @@ class StoryBoardGen():
 
     
 if __name__ == "__main__":
-    # Fake photo data like what would come back from your database
-    # fake_photos = [
-    #     {
-    #         "photo_id": 1,
-    #         "event_id": 1,
-    #         "file_path": r"C:\CSI4999\Photos\arrival1.jpg",
-    #         "photo_taken": "2026-06-15T16:00:00",
-    #         "created_at": "2026-06-15T16:01:00",
-    #         "person_count": 3,
-    #         "max_person_conf": 0.91,
-    #         "obj_class": "person",
-    #         "content_score": 65
-    #     },
-    #     {
-    #         "photo_id": 2,
-    #         "event_id": 1,
-    #         "file_path": r"C:\CSI4999\Photos\arrival2.jpg",
-    #         "photo_taken": "2026-06-15T16:08:00",
-    #         "created_at": "2026-06-15T16:09:00",
-    #         "person_count": 6,
-    #         "max_person_conf": 0.88,
-    #         "obj_class": "person",
-    #         "content_score": 80
-    #     },
-    #     {
-    #         "photo_id": 3,
-    #         "event_id": 1,
-    #         "file_path": r"C:\CSI4999\Photos\ceremony1.jpg",
-    #         "photo_taken": "2026-06-15T16:45:00",
-    #         "created_at": "2026-06-15T16:46:00",
-    #         "person_count": 2,
-    #         "max_person_conf": 0.95,
-    #         "obj_class": "person",
-    #         "content_score": 90
-    #     },
-    #     {
-    #         "photo_id": 4,
-    #         "event_id": 1,
-    #         "file_path": r"C:\CSI4999\Photos\reception1.jpg",
-    #         "photo_taken": "2026-06-15T18:10:00",
-    #         "created_at": "2026-06-15T18:11:00",
-    #         "person_count": 0,
-    #         "max_person_conf": 0.0,
-    #         "obj_class": "dining table, chair",
-    #         "content_score": 55
-    #     },
-    #     {
-    #         "photo_id": 5,
-    #         "event_id": 1,
-    #         "file_path": r"C:\CSI4999\Photos\dancing1.jpg",
-    #         "photo_taken": "2026-06-15T20:30:00",
-    #         "created_at": "2026-06-15T20:31:00",
-    #         "person_count": 10,
-    #         "max_person_conf": 0.89,
-    #         "obj_class": "person",
-    #         "content_score": 95
-    #     }
-    # ]
+
     db = DBConn.SQLbuilder()
     db.connect()
     fake_photos = db.getApprovedPhotosForStoryboard(1)
     generator = StoryBoardGen(20)
 
     storyboard = generator.generateSeq(fake_photos)
+    
     db.insertStoryboardItems(1, storyboard)
 
     print("\nGenerated Storyboard:")
