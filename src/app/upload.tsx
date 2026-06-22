@@ -19,14 +19,57 @@ import {
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const THUMB = (SCREEN_WIDTH - 56) / 3;
 
+const MAX_PHOTOS = 20;
+const QR_TOKEN = "QR_TOKEN_HERE";
+
 type PickedPhoto = { id: string; uri: string };
 
 export default function UploadScreen() {
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
+  const [securityConfirmed, setSecurityConfirmed] = useState(false);
 
-  //Pick from device library
+  const isValidImage = (uri: string) => {
+    const lower = uri.toLowerCase();
+    return (
+      lower.endsWith(".jpg") ||
+      lower.endsWith(".jpeg") ||
+      lower.endsWith(".png") ||
+      lower.includes("image")
+    );
+  };
+
+  const validateUpload = () => {
+    if (!QR_TOKEN || QR_TOKEN === "QR_TOKEN_HERE") {
+      Alert.alert("Security Error", "Missing valid QR event token.");
+      return false;
+    }
+
+    if (photos.length === 0) {
+      Alert.alert("No Photos", "Please select at least one photo.");
+      return false;
+    }
+
+    if (photos.length > MAX_PHOTOS) {
+      Alert.alert("Too Many Photos", `You can only upload ${MAX_PHOTOS} photos at once.`);
+      return false;
+    }
+
+    const invalidPhoto = photos.find((photo) => !isValidImage(photo.uri));
+    if (invalidPhoto) {
+      Alert.alert("Invalid File", "Only JPG, JPEG, and PNG image files are allowed.");
+      return false;
+    }
+
+    if (!securityConfirmed) {
+      Alert.alert("Security Check", "Please confirm the security check before uploading.");
+      return false;
+    }
+
+    return true;
+  };
+
   const pickFromLibrary = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (status !== "granted") {
@@ -36,18 +79,27 @@ export default function UploadScreen() {
       );
       return;
     }
+
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsMultipleSelection: true,
       quality: 0.85,
-      selectionLimit: 20,
+      selectionLimit: MAX_PHOTOS,
     });
+
     if (!result.canceled) {
       const picked: PickedPhoto[] = result.assets.map((a, i) => ({
         id: `${Date.now()}-${i}`,
         uri: a.uri,
       }));
-      setPhotos((prev) => [...prev, ...picked]);
+
+      const combined = [...photos, ...picked].slice(0, MAX_PHOTOS);
+
+      if (photos.length + picked.length > MAX_PHOTOS) {
+        Alert.alert("Upload Limit", `Only ${MAX_PHOTOS} photos can be selected at once.`);
+      }
+
+      setPhotos(combined);
       setDone(false);
     }
   };
@@ -61,14 +113,16 @@ export default function UploadScreen() {
       { text: "Clear", style: "destructive", onPress: () => setPhotos([]) },
     ]);
 
-  // to handle api call
   const handleUpload = async () => {
+    if (!validateUpload()) return;
+
     setUploading(true);
     try {
       const formData = new FormData();
-  
-      formData.append("token", "QR_TOKEN_HERE"); //MAKE SURE TO ADD OUR QR TOKEN HERE
-  
+
+      formData.append("token", QR_TOKEN);
+      formData.append("approved", "false");
+
       photos.forEach((photo, index) => {
         formData.append("files", {
           uri: photo.uri,
@@ -76,7 +130,7 @@ export default function UploadScreen() {
           type: "image/jpeg",
         } as any);
       });
-  
+
       const response = await fetch("https://zealous-stone-0f78c580f.7.azurestaticapps.net/upload", {
         method: "POST",
         headers: {
@@ -84,16 +138,23 @@ export default function UploadScreen() {
         },
         body: formData,
       });
-  
+
       if (!response.ok) {
         const err = await response.json();
         throw new Error(err.detail ?? "Upload failed");
       }
-  
+
       const result = await response.json();
       console.log(`Uploaded ${result.uploaded} photos`);
+
       setDone(true);
       setPhotos([]);
+      setSecurityConfirmed(false);
+
+      Alert.alert(
+        "Upload Submitted",
+        "Photos were uploaded and marked for admin review."
+      );
     } catch (error: any) {
       Alert.alert("Upload Failed", error.message ?? "Please try again.");
     } finally {
@@ -123,6 +184,16 @@ export default function UploadScreen() {
           : "No photos selected"}
       </Text>
 
+      <View style={s.securityBox}>
+        <Ionicons name="shield-checkmark-outline" size={20} color="#10B981" />
+        <View style={{ flex: 1 }}>
+          <Text style={s.securityTitle}>Security Check</Text>
+          <Text style={s.securityText}>
+            Only image files are allowed. Uploads use the event QR token and are submitted for admin review.
+          </Text>
+        </View>
+      </View>
+
       {photos.length === 0 ? (
         <View style={s.empty}>
           <TouchableOpacity
@@ -151,8 +222,6 @@ export default function UploadScreen() {
           )}
         </View>
       ) : (
-
-      
         <FlatList
           data={photos}
           numColumns={3}
@@ -192,7 +261,26 @@ export default function UploadScreen() {
       {photos.length > 0 && (
         <View style={s.footer}>
           <TouchableOpacity
-            style={[s.uploadBtn, uploading && s.uploadBtnBusy]}
+            style={s.confirmRow}
+            onPress={() => setSecurityConfirmed(!securityConfirmed)}
+            activeOpacity={0.8}
+          >
+            <Ionicons
+              name={securityConfirmed ? "checkbox" : "square-outline"}
+              size={22}
+              color={securityConfirmed ? "#10B981" : "#5A6A85"}
+            />
+            <Text style={s.confirmText}>
+              I confirm these photos are safe to upload.
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              s.uploadBtn,
+              uploading && s.uploadBtnBusy,
+              !securityConfirmed && s.uploadBtnDisabled,
+            ]}
             onPress={handleUpload}
             activeOpacity={0.85}
             disabled={uploading}
@@ -257,10 +345,33 @@ const s = StyleSheet.create({
     fontSize: 13,
     color: "#3B4A62",
     paddingHorizontal: 24,
-    marginBottom: 20,
+    marginBottom: 12,
   },
 
-  // Empty / drop zone
+  securityBox: {
+    marginHorizontal: 20,
+    marginBottom: 12,
+    padding: 12,
+    borderRadius: 14,
+    backgroundColor: "#0A2A1E",
+    borderWidth: 1,
+    borderColor: "#10B981",
+    flexDirection: "row",
+    gap: 10,
+    alignItems: "flex-start",
+  },
+  securityTitle: {
+    color: "#10B981",
+    fontWeight: "800",
+    fontSize: 13,
+    marginBottom: 2,
+  },
+  securityText: {
+    color: "#A7F3D0",
+    fontSize: 12,
+    lineHeight: 17,
+  },
+
   empty: {
     flex: 1,
     paddingHorizontal: 20,
@@ -386,6 +497,17 @@ const s = StyleSheet.create({
     borderTopColor: "#1E2A40",
     backgroundColor: "#0D1117",
   },
+  confirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    marginBottom: 12,
+  },
+  confirmText: {
+    color: "#AAB7CF",
+    fontSize: 13,
+    fontWeight: "600",
+  },
   uploadBtn: {
     backgroundColor: "#2563EB",
     borderRadius: 14,
@@ -401,6 +523,7 @@ const s = StyleSheet.create({
     elevation: 8,
   },
   uploadBtnBusy: { opacity: 0.65 },
+  uploadBtnDisabled: { opacity: 0.5 },
   uploadBtnText: {
     fontSize: 13,
     fontWeight: "800",
