@@ -226,75 +226,82 @@ class blipRanker():
         return {"score": score,"keywords": matched}
 
     
-    def analyze(self, eventID):
+    def analyze(self, photoID:str, photo:str):
+        #photos = self.db.getPhotos(eventID)
+
+        if photo is None:
+            return "No photos found"
+        
+        skippable = ["nudity", "a low quality random photo"]
+        
+        img = photo
+        
+        caption = self.captionImg(img)
+        if caption is None:
+            caption = "None"
+        mood = self.classifyMood(img)
+
+        moodLabel = mood.get("label", "unknown")
+        moodConfScore = float(mood.get("score", 0)) 
+
+        allMood = mood.get("all_mood_labels", [moodLabel])
+        allMoodScore = mood.get("all_mood_scores", [moodConfScore])
+
+        keywordScore = 0
+        keywords = []
+        nudityCheck = 0
+
+        if moodLabel in skippable:
+            keywordScore = 0
+
+            if moodLabel == "nudity":
+                nudityCheck = True
+
+                print(f"Scoring skipped: {moodLabel}")
+        else:
+            scoreResult  = self.romanticScorePhotos(caption)
+
+            if isinstance(scoreResult, (int, float)):
+                keywordScore = float(scoreResult)
+                keywords = []
+
+
+            elif isinstance(scoreResult, dict):
+                keywordScore = float(scoreResult.get("score", 0))
+                keywords = scoreResult.get("keywords", [])
+    
+        dataDict = self.buildDict(
+            photo_id=photoID,
+            caption=caption,
+            moodLabel=moodLabel,
+            moodConfScore=moodConfScore,
+            allMood=allMood,
+            allMoodScore=allMoodScore,
+            kwScore=keywordScore,
+            kw=keywords,
+            nudityCheck=nudityCheck
+        )
+
+        return dataDict
+    
+    def batchRun(self, eventID: int):
         photos = self.db.getPhotos(eventID)
 
         if photos is None:
             return "No photos found"
         
-        skippable = ["nudity", "a low quality random photo"]
-        
         results = []
 
         for photo in photos:
-            img = photo["file_path"]
-            photo_id = photo["photo_id"]
-
-            caption = self.captionImg(img)
-            if caption is None:
-                caption = "None"
-            mood = self.classifyMood(img)
-
-            moodLabel = mood.get("label", "unknown")
-            moodConfScore = float(mood.get("score", 0)) 
-
-            allMood = mood.get("all_mood_labels", [moodLabel])
-            allMoodScore = mood.get("all_mood_scores", [moodConfScore])
-
-            keywordScore = 0
-            keywords = []
-            nudityCheck = 0
-
-            if moodLabel in skippable:
-                keywordScore = 0
-
-                if moodLabel == "nudity":
-                    nudityCheck = True
-
-                    print(f"Scoring skipped: {moodLabel}")
-            else:
-                scoreResult  = self.romanticScorePhotos(caption)
-
-                if isinstance(scoreResult, (int, float)):
-                    keywordScore = float(scoreResult)
-                    keywords = []
-
-
-                elif isinstance(scoreResult, dict):
-                    keywordScore = float(scoreResult.get("score", 0))
-                    keywords = scoreResult.get("keywords", [])
+            res = self.analyze(photo["photo_id"], photo["file_path"])
+            results.append(res)
         
-            dataDict = self.buildDict(
-                photo_id=photo_id,
-                caption=caption,
-                moodLabel=moodLabel,
-                moodConfScore=moodConfScore,
-                allMood=allMood,
-                allMoodScore=allMoodScore,
-                kwScore=keywordScore,
-                kw=keywords,
-                nudityCheck=nudityCheck
-            )
-
-            #ranking_id = self.db.insertImageRanking(dataDict)
-
-            results.append(dataDict)
         self.db.insertImageRanking(results)
         return results
-        
+
 def main():
     test = blipRanker()
-    test.analyze(1)
+    test.batchRun(1)
 
 if __name__ == "__main__":
     main()

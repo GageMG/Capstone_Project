@@ -1,15 +1,39 @@
+import ContentScorer
+import ImageRanker
+import PreFilter
+import VideoExtraction
 import fastapi
 import qrGen
 from pydantic import BaseModel
-import os, shutil
-from fastapi import File, UploadFile
+import os
+from fastapi import File, UploadFile, Form
 from typing import List
+import DBConn
+import AzureClass
+from pathlib import Path
+from DataStruct import uploadResults as dc
+from dataclasses import asdict
 
-#For the upload directory
-Upload_Dir = "uploads"
-os.makedirs(Upload_Dir, exist_ok=True)
+blob = AzureClass.blobHandler()
+db = DBConn.SQLbuilder()
+db.connect()
 
+def buildPhotoModelDB(eventID: int):
+    cs = ContentScorer.ContentScoring()
+    ir = ImageRanker.blipRanker()
+    pf = PreFilter.ImgQualFilt()
+    ve = VideoExtraction.ExtractVidFrames()
 
+    pf.batchRunPhotos(eventID)
+    cs.batchRun(eventID)
+    ir.batchRun(eventID)
+
+class uploadModel(BaseModel):
+    eventID: int
+    files: List[UploadFile] = File(...)
+    userID: int
+
+    
 class QRRequest(BaseModel):
     eventID: int
     expirationDate: str
@@ -46,16 +70,45 @@ async def readUser(userID : str):
 
 #API endpoint for the upload function
 @app.post('/upload')
-async def uploadPhotos(files: List[UploadFile] = File(...)):
-    saved = []
-    for file in files:
-        dest = os.path.join(Upload_Dir, file.filename)
-        with open(dest, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-            saved.append(file.filename)
-            return {"Uploaded": len(saved), "files": saved}
+async def uploadPhotos(eventID:int = Form(...), userID:int = Form(...), files: List[UploadFile] = File(...)):
+    
+    photosExt = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic")
+    vidExt = (".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".mkv")
 
-@app.get('/events') 
-async def getEvent():
-    events = db.query("SELECT * FROM placeholder")  #need to have databse connect for db to work
-    return events
+    saved = []
+            
+    for file in files:
+        orgName = Path(file.filename).name
+        suffix = Path(orgName).suffix.lower()
+
+        if suffix in photosExt:
+            fType = "photo"
+        elif suffix in vidExt:
+            fType = "video"
+        else:
+            #saved.append({"file_name": file.filename, "status": "skipped", "reason": "Unsupported file type"})
+            saved.append(asdict(dc(orgName, "skipped", None, None, None, None, "Unsupported file type")))
+            continue
+
+        try:
+            res = await blob.fileUpload(file, eventID, fType)
+            saved.append(asdict(dc(res["original_name"],"saved", fType, res["size_bytes"], res["url"], res["blob_name"], 'success', res["content_type"] )))
+            print(f'File: {res["url"]}, Size: {res["size_bytes"]} bytes, Type: {fType}')
+        except Exception as e:
+            saved.append(asdict(dc(orgName, "failed", None, None, None, None, str(e))))
+
+    uploadRows = []
+
+    for item in saved:
+        if item["status"] != "saved":
+            continue
+
+        uploadRows.append({"event_id": eventID,"user_id": userID,"original_file_name": item["file_name"],"blob_name": item["blob_name"],"file_path": item["url"], 
+        "media_type": item["file_type"],"mime_type": item["content_type"],"file_size": item["size_bytes"],"upload_status": "uploaded","processing_status": "not_started"})
+
+    inserted = db.insertUploads(uploadRows)
+
+        
+    return {"event_id": eventID,"user_id": userID,"uploaded": len([item for item in saved if item["status"] == "saved"]),
+        "db_records_inserted": len(inserted) if inserted else 0,"results": saved}
+        

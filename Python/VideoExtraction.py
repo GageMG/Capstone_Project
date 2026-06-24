@@ -1,17 +1,20 @@
+import os
+
 import cv2 as cv
 from pathlib import Path
-
+import tempfile
+import DBConn
 
 class ExtractVidFrames():
     def __init__(self):
-        pass
-    
+        self.db = DBConn.SQLbuilder()
+        self.db.connect()
         
-    def extractFrames(self, inPath: str, outPath: str, eventID: int, setSeconds: int= 3):
+    def extractFrames(self, inPath: str, outPath: str, eventID: int, videoID: int, setSeconds: int= 3):
 
         vidPath = Path(inPath)
-        outPut = Path(outPath) / f"videoID{eventID}"
-        outPut.mkdir(parents=True, exist_ok=True)
+        #outPut = Path(outPath) / f"videoID_{videoID}"
+        #outPut.mkdir(parents=True, exist_ok=True)
 
         if not vidPath.exists():
             print(f'Video not found: {vidPath}')
@@ -34,6 +37,8 @@ class ExtractVidFrames():
         savedCount = 0
 
         while True:
+            outPut = Path(outPath) / f"video_ID_{videoID}"
+            outPut.mkdir(parents=True, exist_ok=True)
             success, frame = cap.read()
 
             if not success: 
@@ -44,17 +49,32 @@ class ExtractVidFrames():
                 cv.imwrite(str(frameFile), frame)
                 savedFrames.append(str(frameFile))
                 savedCount += 1
+                print(f"{savedCount}/{frameInt}.")
 
             frameCount += 1
-
         cap.release()
 
         return savedFrames
     
+    def batchRun(self, eventID: int, outPath: str):
+        if not os.path.exists(outPath):
+            os.makedirs(outPath)
+        tempDir = tempfile.mkdtemp(prefix=f"event_{eventID}_", suffix="_frames", dir=outPath)
+        videos = self.db.getVideos(eventID)
+        if not videos:
+            print("No videos found for the given event.")
+            return
+
+        for video in videos:
+            self.extractFrames(video["file_path"], tempDir, eventID, video["video_id"])
+
+            print(f"Extracted frames for event {eventID} to {tempDir}")
+
 def main():
     frames = ExtractVidFrames()
-    frames.extractFrames(r"C:\Users\Micha\Downloads\ProjectDemo2.mp4", r'C:\CSI4999\Videos\Frames', 1 )
-    print(frames)
+    #frames.extractFrames(r"C:\CSI4999\Videos\kelly_&_michael's_wedding_day_teaser (2160p).mp4", r'C:\CSI4999\Videos\Frames', 1 )
+    frames.batchRun(1, r'C:\CSI4999\Videos\tempFrames')
+    print('done')
 
 if __name__ == "__main__":
     main()

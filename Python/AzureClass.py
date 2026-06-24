@@ -1,0 +1,55 @@
+import os
+from azure.storage.blob import BlobServiceClient, ContentSettings
+from dotenv import load_dotenv
+from uuid import uuid4
+from pathlib import Path
+from fastapi import UploadFile
+
+class blobHandler:
+    def __init__(self):
+        load_dotenv()
+
+        self.connectString = os.getenv("AZURE_CONNECTION_STRING")
+        if not self.connectString:
+            raise ValueError("Missing Connection String")
+        
+        self.container = os.getenv("CONTAINER_NAME")
+
+        if not self.container:
+            raise ValueError("Missing Container Name")
+        #print(self.container)
+        
+        self.blobClient = BlobServiceClient.from_connection_string(self.connectString)
+        self.containerClient = self.blobClient.get_container_client(self.container)
+
+
+    def createBlobName(self, eventId: int,fType: str, orgName: str):
+        name = Path(orgName).name
+        unqName = f'{uuid4().hex}_{name}'
+        return f"events/{eventId}/{fType}s/{unqName}"
+
+    async def fileUpload(self,file: UploadFile, eventID: str, fType: str):
+
+        orgName = Path(file.filename).name
+        blobName = self.createBlobName(eventID, fType, orgName)
+
+        contents = await file.read()
+
+        contentType = file.content_type or "application/octet-stream"
+
+        blob_client = self.containerClient.get_blob_client(blobName)
+
+        blob_client.upload_blob(data =contents, overwrite=True, content_settings=ContentSettings(content_type=contentType))
+
+        return {"original_name": orgName, "blob_name": blobName, "url": blob_client.url, "size_bytes": len(contents), "content_type": contentType}
+
+    def getBlobUrl(self, blobName:str):
+        blobClient = self.containerClient.get_blob_client(blobName)
+        return blobClient.url
+    
+    def downloadBlob(self, blobName):
+        blobClient = self.containerClient.get_blob_client(blobName)
+        return blobClient.download_blob().readall()
+if __name__ == "__main__":
+    u = blobHandler()
+    print(u)

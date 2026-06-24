@@ -64,6 +64,9 @@ class Helpers():
                 exif_data = img._getexif()
 
                 if not exif_data:
+                    metadata["photo_original_date"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    metadata["camera_model"] = "N/A"
+                    metadata["gps"] = "N/A"
                     return metadata
 
                 for tag_id, value in exif_data.items():
@@ -86,6 +89,10 @@ class Helpers():
         except Exception as e:
             print(f"Metadata error: {e}")
             return metadata
+    @staticmethod
+    def getIDNum(s:str, pos:int):
+        return int(s.split('_')[pos])
+    
     @staticmethod    
     def formatTimeStamps(value):
       

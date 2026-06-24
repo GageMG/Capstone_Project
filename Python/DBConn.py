@@ -24,13 +24,14 @@ class SQLbuilder:
             print("Connection failed:", error)
             return False
 
-    def insertToDB(self, values, table: str = "Basic"):
-        """
-        Generic insert helper.
-        values: a single dict OR a list of dicts representing row(s) to insert.
-        """
+    def insertToDB(self, values, table: str = "Basic",  kwMatch: str ="photo_id"):
         try:
-            result = self.client.table(table).insert(values).execute()
+            query = self.client.table(table)
+            if kwMatch:
+                result = query.upsert(values, on_conflict=kwMatch).execute()
+            else:
+                result = query.insert(values).execute()
+
             count = len(values) if isinstance(values, list) else 1
             print(f"Saved {count} row(s) to {table}")
             return result.data
@@ -241,8 +242,7 @@ class SQLbuilder:
             return []
 
         try:
-            # Join storyboard_items -> photos via Supabase's nested select syntax.
-            # Requires a foreign key from storyboard_items.photo_id -> photos.photo_id
+  
             result = (
                 self.client.table("storyboard_items")
                 .select(
@@ -257,8 +257,6 @@ class SQLbuilder:
 
             rows = result.data or []
 
-            # Flatten nested photos.file_path and apply COALESCE-style defaults in Python,
-            # since PostgREST doesn't support COALESCE directly in select().
             cleaned = []
             for row in rows:
                 photo = row.pop("photos", None) or {}
@@ -314,6 +312,88 @@ class SQLbuilder:
             "file_size": fileSize
         }
         return self.insertToDB(values, table)
+    
+    def getVideos(self, eventID: int):
+        try:
+            result = (
+                self.client.table("videos")
+                .select("video_id, file_path")
+                .eq("event_id", eventID)
+                .execute()
+            )
+
+            print("Video Data obtained")
+            return result.data
+
+        except Exception as e:
+            print(f"Error Occurred: {e}")
+            return None
+    
+    def insertVideoPreFilter(self, results: list):
+        table = 'filter_videos'
+        values = []
+        for result in results:
+            values.append({
+                "video_id": result.get("video_id"),
+                "status": result.get("status"),
+                "reason": result.get("reason"),
+                "blur_score": result.get("blur_score"),
+                "bright_score": result.get("bright_score"),
+                "contrast_score": result.get("contrast_score"),
+                "width": result.get("width"),
+                "height": result.get("height"),
+                "image_hash": result.get("image_hash"),
+                "camera_model": result.get("camera_model"),
+                "gps": result.get("gps"),
+                "photo_original_date": result.get("photo_original_date"),
+                "user_approved": result.get("user_approved")
+            })
+
+        return self.insertToDB(values, table)
+    
+    def insertUploads(self, uploads: list[dict]):
+        if not uploads:
+            print("No uploads to insert.")
+            return []
+
+        try:
+            rows = []
+
+            for item in uploads:
+                rows.append({
+                    "event_id": item["event_id"],
+                    "qr_code_id": item.get("qr_code_id"),
+                    "guest_id": item.get("guest_id"),
+                    "user_id": item.get("user_id"),
+
+                    "original_file_name": item["original_file_name"],
+                    "blob_name": item["blob_name"],
+                    "file_path": item["file_path"],
+
+                    "media_type": item["media_type"],
+                    "mime_type": item.get("mime_type"),
+                    "file_size": item.get("file_size", 0),
+
+                    "upload_status": item.get("upload_status", "uploaded"),
+                    "processing_status": item.get("processing_status", "not_started"),
+
+                    "photo_id": item.get("photo_id"),
+                    "video_id": item.get("video_id")
+                })
+
+            result = (
+                self.client
+                .table("uploads")
+                .insert(rows)
+                .execute()
+            )
+
+            print(f"Inserted {len(result.data)} upload records.")
+            return result.data
+
+        except Exception as e:
+            print(f"Error inserting uploads: {e}")
+            return None
 
 
 if __name__ == "__main__":

@@ -1,3 +1,5 @@
+import os
+import re
 import cv2 as cv
 import numpy as np
 from pathlib import Path
@@ -21,13 +23,16 @@ class ImgQualFilt:
 
     
     def buildDict(self, photo_id: int, status: str, reasons: list[str], blurScore: float, brightScore: float, contScore: float, width: float, height: float, 
-                  imgHash: str, model: str, gps: str, photoOriginalDate: str, userApproved: int = 0):
+                  imgHash: str, model: str, gps: str, photoOriginalDate: str, userApproved: int = 0, isVideo: bool = False):
+        id = "photo_id"
+        if isVideo:
+            id = "video_id"
         if reasons:
             reasonStr = ",".join(reasons)
         else:
             reasonStr = "N/A"
 
-        return {"photo_id": photo_id,
+        return {id: photo_id,
                 "status":status,
                 "reason": reasonStr,
                 "blur_score": blurScore,
@@ -64,15 +69,15 @@ class ImgQualFilt:
         path = Path(imgPath)
 
         if not path.exists():
-          return self.buildDict('error', ['FNF'], 101., -1, -1, -1, 0 )
+          return self.buildDict(0,"error",["FNF"],101.0,-1,-1,0,0,None, None,None,None)
         
         self.img = cv.imread(str(path))
 
     def errorDict(self, photoID):
-        return self.buildDict(photoID,"error",["FNF"],101.0,-1,-1,0,0,None)
+        return self.buildDict(photoID,"error",["FNF"],101.0,-1,-1,0,0,None, None,None,None)
         
 
-    def analyzeImg(self, photoID: int, imgPath: str):
+    def analyzeImg(self, photoID: int, imgPath: str, isVideo: bool = False):
         path = Path(imgPath)
 
         imgHash = self.hashImages(path)
@@ -123,11 +128,12 @@ class ImgQualFilt:
             reason.append('passed_filter')
 
         return self.buildDict(photoID, status, reason, round(float(blurScore), 2), round(float(brightScore),2), round(float(contrastScore),2), width, height, imgHash,
-                              md["camera_model"], md["gps"], md["photo_original_date"])
+                              md["camera_model"], md["gps"], md["photo_original_date"], isVideo)
     
-    def batchRun(self, eventID: int):
+    def batchRunPhotos(self, eventID: int):
+
         photos = self.db.getPhotos(eventID)
-        
+ 
         if photos is None:
             return "No photos found"
         
@@ -141,6 +147,46 @@ class ImgQualFilt:
 
         return results
     
+    def batchRunVideos(self, tempDir: str, eventID: int):
+        ext = ('.jpg', '.jpeg', '.png')
+        results = []
+        evID = ph.getIDNum(Path(tempDir).name, pos = 1)
+        tempPath = Path(tempDir)
+        if not tempPath.exists():
+            return "Invalid temp directory"
+
+        if evID != eventID: 
+                err = f"Event ID mismatch: expected {eventID}, got {evID}"
+                print(err)
+                return "Event ID mismatch"
+
+        for videoFolder in tempPath.iterdir():
+
+            if not videoFolder.is_dir():
+                continue
+
+            vidID = ph.getIDNum(videoFolder.name, pos=2)
+
+            print(f"Processing video folder: {videoFolder.name}, video_id: {vidID}")
+
+            for frameNum, framePath in enumerate(videoFolder.iterdir()):
+
+                if not framePath.is_file():
+                    continue
+
+                if not framePath.name.lower().endswith(ext):
+                    continue
+
+                res = self.analyzeImg(frameNum, str(framePath), isVideo=True)
+                res["video_id"] = vidID
+                results.append(res)
+
+                print(f"Processed video {vidID}, frame {frameNum}: {framePath.name}")
+        
+        self.db.insertVideoPreFilter(results)
+
+        return results
+
     def hashImages(self, imgPath: str):
         try:
             hash = imagehash.phash(Image.open(imgPath))
@@ -154,9 +200,10 @@ class ImgQualFilt:
 def main():
     ts = ImgQualFilt()
 
-    result2 = ts.batchRun(1)
+    #result2 = ts.batchRun(1)
     #for result in result2:
     #    print(result)
+    result = ts.batchRunVideos(r'C:\CSI4999\Videos\tempFrames\event_1_35iz4tfs_frames', 1)
 
 if __name__ == "__main__":
     main()
