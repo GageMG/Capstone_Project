@@ -108,21 +108,21 @@ class SQLbuilder:
             }
             for item in results
         ]
-        return self.insertToDB(values, table)
+        return self.insertToDB(values, table, dtype)
 
-    def insertContent(self, results: list[dict], dt = 'photo_id'):
+    def insertContent(self, results: list[dict], dtype = 'photo_id'):
         if not results:
             print("No filter results to insert.")
             return None
         
         table = 'photo_content'
 
-        if dt == 'frame_id':
+        if dtype == 'frame_id':
             table = 'video_content'
 
         values = [
             {
-                dt: item.get(dt),
+                dtype: item.get(dtype),
                 "person_count": item.get("person_count", 0),
                 "max_person_conf": item.get("max_person_conf", 0.0),
                 "obj_class": item.get("obj_class", ""),
@@ -131,7 +131,7 @@ class SQLbuilder:
             }
             for item in results
         ]
-        return self.insertToDB(values, table)
+        return self.insertToDB(values, table, dtype)
 
     def insertImageRanking(self, dataDict: list[dict], dtype: str ='photo_id'):
         if dataDict is None:
@@ -155,7 +155,7 @@ class SQLbuilder:
             dtype: item.get(dtype)
         } for item in dataDict]
 
-        return self.insertToDB(values, table)
+        return self.insertToDB(values, table, dtype)
 
     def selectAll(self, table: str):
         try:
