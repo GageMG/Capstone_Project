@@ -229,13 +229,13 @@ class SQLbuilder:
             return []
 
         try:
-  
+
             result = (
                 self.client.table("storyboard_items")
                 .select(
                     "storyboard_id, event_id, photo_id, sequence_order, "
                     "scene_label, confidence, reason, "
-                    "photos(file_path)"
+                    "photos(upload_id, uploads(file_path, blob_name))" 
                 )
                 .eq("event_id", eventID)
                 .order("sequence_order", desc=False)
@@ -247,13 +247,19 @@ class SQLbuilder:
             cleaned = []
             for row in rows:
                 photo = row.pop("photos", None) or {}
-                row["file_path"] = photo.get("file_path")
+                upload = photo.get("uploads") or {}
+                row["file_path"] = upload.get("file_path")
+                row["blob_name"] = upload.get("blob_name")
                 row["scene_label"] = row.get("scene_label") or "General Event Moment"
                 row["confidence"] = row.get("confidence") or 0
                 row["reason"] = row.get("reason") or ""
                 cleaned.append(row)
 
             return cleaned
+
+        except Exception as e:
+            print(f"Error fetching storyboard for event {eventID}: {e}")
+            return []
 
         except Exception as e:
             print(f"Error getting storyboard: {e}")
@@ -278,27 +284,52 @@ class SQLbuilder:
         }
         return self.insertToDB(values, table)
 
-    def insertGeneratedVideo(self, eventID: int, fileName: str, filePath: str, musicID: int = None,
-                              title: str = "Final Event Video", videoType: str = "slideshow",
-                              status: str = "completed", durationSeconds: float = 0, width: int = 1280,
-                              height: int = 720, fps: int = 30, fileSize: int = 0):
-        table = 'generated_videos'
+    def insertGeneratedVideo(
+        self,
+        eventID: int,
+        fileName: str,
+        filePath: str,
+        musicID: int | None = None,
+        title: str = "Final Event Video",
+        videoType: str = "slideshow",
+        status: str = "completed",
+        durationSeconds: float = 0,
+        width: int = 1280,
+        height: int = 720,
+        fps: int = 30,
+        fileSize: int = 0
+    ):
+        try:
+            values = {
+                "event_id": eventID,
+                "music_id": musicID,
+                "title": title,
+                "file_name": fileName,
+                "file_path": filePath,
+                "video_type": videoType,
+                "status": status,
+                "duration_seconds": durationSeconds,
+                "width": width,
+                "height": height,
+                "fps": fps,
+                "file_size": fileSize
+            }
 
-        values = {
-            "event_id": eventID,
-            "music_id": musicID,
-            "title": title,
-            "file_name": fileName,
-            "file_path": filePath,
-            "video_type": videoType,
-            "status": status,
-            "duration_seconds": durationSeconds,
-            "width": width,
-            "height": height,
-            "fps": fps,
-            "file_size": fileSize
-        }
-        return self.insertToDB(values, table)
+            print("Generated video insert values:", values)
+
+            result = (
+                self.client
+                .table("generated_videos")
+                .insert(values)
+                .execute()
+            )
+
+            print("Generated video inserted.")
+            return result.data
+
+        except Exception as e:
+            print(f"Error inserting into generated_videos: {e}")
+            return None
             
     def insertUploads(self, uploads: list[dict]):
         if not uploads:
@@ -512,6 +543,71 @@ class SQLbuilder:
             print(f"Error occurred upserting video frames: {e}")
             return []
         
+    def insertPromptRequest(self, promptData: dict):
+
+        if not promptData:
+            print("No prompt request data to insert.")
+            return None
+
+        try:
+            row = {
+                "event_id": promptData.get("event_id") or promptData.get("eventID"),
+                "user_id": promptData.get("user_id") or promptData.get("userID"),
+                "guest_id": promptData.get("guest_id") or promptData.get("guestID"),
+
+                "original_prompt": promptData.get("original_prompt") or promptData.get("prompt"),
+
+                "intent": promptData.get("intent", "unknown"),
+                "content_type": promptData.get("content_type", "Both"),
+                "theme": promptData.get("theme", "general"),
+                "mood": promptData.get("mood", "general"),
+                "event_type": promptData.get("event_type", "unknown"),
+                "timing_preference": promptData.get("timing_preference", "unknown"),
+                "music_preference": promptData.get("music_preference", "unknown"),
+
+                "allowed": promptData.get("allowed", True),
+                "out_of_scope": promptData.get("out_of_scope", False),
+                "unsafe_or_invalid": promptData.get("unsafe_or_invalid", False),
+
+                "reason": promptData.get("reason", "No reason provided."),
+                "response": promptData.get("response", ""),
+                "processing_status": promptData.get("processing_status", "not_started")
+            }
+
+            required = [
+                "event_id",
+                "user_id",
+                "original_prompt",
+                "intent",
+                "content_type",
+                "theme",
+                "mood",
+                "event_type",
+                "timing_preference",
+                "music_preference",
+                "reason",
+                "response"
+            ]
+
+            missing = [field for field in required if row.get(field) is None]
+
+            if missing:
+                print(f"Missing required prompt request fields: {missing}")
+                return None
+
+            result = (
+                self.client
+                .table("prompt_requests")
+                .insert(row)
+                .execute()
+            )
+
+            print("Prompt request inserted.")
+            return result.data
+
+        except Exception as e:
+            print(f"Error inserting prompt request: {e}")
+            return None 
 if __name__ == "__main__":
     db = SQLbuilder()
     if db.connect():

@@ -5,6 +5,7 @@ from moviepy import VideoFileClip, AudioFileClip
 import DBConn
 import AzureClass
 import tempfile
+import StoryBoard 
 
 class SlideShowGenerator:
     def __init__(self, outputDir: str = r'C:\CSI4999\Videos\Output', width: int = 1280, height: int = 720, fps: int = 30, secPerPhoto: int = 3):
@@ -147,32 +148,32 @@ class SlideShowGenerator:
         return "C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3"
     
     def testFinalVid(self, eventID, rawVideoPath):
-        if rawVideoPath:
-            musicPath = self.pickMusic(event_type="genral")
+#         if rawVideoPath:
+#             musicPath = self.pickMusic(event_type="genral")
 
-            finalVideoPath = rf"C:\CSI4999\Videos\Output\event_{eventID}_slideshow_with_music.mp4"
+        finalVideoPath = rf"C:\CSI4999\Videos\Output\event_{eventID}_slideshow_with_music.mp4"
 
-            if Path(musicPath).exists():
-                self.attachMusic(
-                    videoPath=rawVideoPath,
-                    musicPath=musicPath,
-                    outPutPath=finalVideoPath
-                )
-                musicID = self.db.insertMusic(
-    title="Wedding Background Track",
-    fileName="jonasblakewood-wedding-519603.mp3",
-    filePath=r"C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3",
-    artist="Jonas Blakewood",
-    eventType="general",
-    moodLabel="warm",
-    durationSeconds=0,
-    source="local file",
-    licenseType="project testing",
-    isActive=True
-)
+#             if Path(musicPath).exists():
+#                 self.attachMusic(
+#                     videoPath=rawVideoPath,
+#                     musicPath=musicPath,
+#                     outPutPath=finalVideoPath
+#                 )
+#                 musicID = self.db.insertMusic(
+#     title="Wedding Background Track",
+#     fileName="jonasblakewood-wedding-519603.mp3",
+#     filePath=r"C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3",
+#     artist="Jonas Blakewood",
+#     eventType="general",
+#     moodLabel="warm",
+#     durationSeconds=0,
+#     source="local file",
+#     licenseType="project testing",
+#     isActive=True
+# )
 
-                print(f"Inserted music_id: {musicID}")
-                self.db.insertGeneratedVideo(
+        #print(f"Inserted music_id: {musicID}")
+        self.db.insertGeneratedVideo(
     eventID=1,
     fileName=Path(finalVideoPath).name,
     filePath=finalVideoPath,
@@ -186,10 +187,10 @@ class SlideShowGenerator:
     fps=30,
     fileSize=Path(finalVideoPath).stat().st_size
 )
-                print(f"Final video created: {finalVideoPath}")
-            else:
-                print(f"Music file not found: {musicPath}")
-                print(f"Video without music created: {rawVideoPath}")
+        print(f"Final video created: {finalVideoPath}")
+            # else:
+            #     print(f"Music file not found: {musicPath}")
+            #     print(f"Video without music created: {rawVideoPath}")
     def attachMusic(self, videoPath, musicPath, outPutPath):
 
         video = VideoFileClip(videoPath)
@@ -206,9 +207,13 @@ class SlideShowGenerator:
 
 def main():
     db = DBConn.SQLbuilder()
+    sb = StoryBoard.StoryBoardGen()
     eventID = 1 
     db.connect()
+    photos = db.getApprovedPhotosForStoryboard(eventID)
+    t= sb.generateSeq(photos)
     storyboard = db.getStoryboardByEvent(eventID)
+
     if not storyboard:
         print(f"No storyboard found for event_id {eventID}")
     else:

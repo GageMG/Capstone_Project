@@ -5,8 +5,8 @@ import llavaRanker
 from pathlib import Path
 
 class StoryBoardGen():
-    def __init__(self, eventTimeGap):
-        self.eventTimeGap = 20
+    def __init__(self, eventTimeGap: int = 20):
+        self.eventTimeGap = eventTimeGap
         self.db = DBConn.SQLbuilder()
         self.db.connect()
         self.PH = ProjectHelper.Helpers()
@@ -122,10 +122,10 @@ if __name__ == "__main__":
 
     db = DBConn.SQLbuilder()
     db.connect()
-    fake_photos = db.getApprovedPhotosForStoryboard(1)
-    generator = StoryBoardGen(20)
+    photos = db.getApprovedPhotosForStoryboard(1)
+    generator = StoryBoardGen(1)
 
-    storyboard = generator.generateSeq(fake_photos)
+    storyboard = generator.generateSeq(photos)
     
     db.insertStoryboardItems(1, storyboard)
 

@@ -1,7 +1,7 @@
 import fastapi
+from fastapi import File, UploadFile, Form, HTTPException, Depends, Query, status
 import qrGen
-from pydantic import BaseModel
-from fastapi import File, UploadFile, Form
+from pydantic import BaseModel, Field
 from typing import List
 import DBConn
 import AzureClass
@@ -9,8 +9,16 @@ from pathlib import Path
 from DataStruct import uploadResults as dc
 from dataclasses import asdict
 import newRunner
+import StoryBoard
+import SlideShow
+import uvicorn
+import ChatBot
+import logging
+import json
 
-nr = newRunner.newRunner()
+logger = logging.getLogger('MainAPI')
+logging.basicConfig(level=logging.INFO)
+
 blob = AzureClass.blobHandler()
 db = DBConn.SQLbuilder()
 db.connect()
@@ -18,8 +26,21 @@ db.connect()
 class uploadModel(BaseModel):
     eventID: int
     files: List[UploadFile] = File(...)
+    guestID: int
     userID: int
 
+class PromptRequest(BaseModel):
+    eventID: int = Field(..., gt=0)
+    userID: int = Field(..., gt=0)
+    guestID: int | None = None
+    prompt: str = Field(..., min_length=1, max_length=1000)
+
+
+class MakeVideoRequest(BaseModel):
+    eventID: int
+    userID: int
+    feeling: str
+ 
     
 class QRRequest(BaseModel):
     eventID: int
@@ -58,7 +79,7 @@ async def readUser(userID : str):
 #API endpoint for the upload function
 @app.post('/upload')
 async def uploadPhotos(eventID:int = Form(...), userID:int = Form(...), files: List[UploadFile] = File(...)):
-    
+    nr = newRunner.newRunner()
     photosExt = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic")
     vidExt = (".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".mkv")
 
@@ -73,7 +94,6 @@ async def uploadPhotos(eventID:int = Form(...), userID:int = Form(...), files: L
         elif suffix in vidExt:
             fType = "video"
         else:
-            #saved.append({"file_name": file.filename, "status": "skipped", "reason": "Unsupported file type"})
             saved.append(asdict(dc(orgName, "skipped", None, None, None, None, "Unsupported file type")))
             continue
 
@@ -98,8 +118,8 @@ async def uploadPhotos(eventID:int = Form(...), userID:int = Form(...), files: L
     inserted = db.insertUploads(uploadRows)
     mediaInserts = db.insertMediaRecordsFromUploads(inserted)
 
-    nr.runProcess(eventID, 'photo')
-    nr.runProcess(eventID, 'video')
+    #nr.runProcess(eventID, 'photo')
+    #nr.runProcess(eventID, 'video')
         
     return {
         "event_id": eventID,
@@ -110,4 +130,77 @@ async def uploadPhotos(eventID:int = Form(...), userID:int = Form(...), files: L
         "video_records_inserted": len(mediaInserts["videos"]),
         "results": saved
     }
-  #  if __name__ == "__main":
+  
+@app.post("/video/generate")
+async def generateVideo(request: MakeVideoRequest, req: MakeVideoRequest):
+    try:
+        ss = SlideShow.SlideShowGenerator()
+        sb = StoryBoard.StoryBoardGen()
+        
+        media = db.getApprovedPhotosForStoryboard(req.eventID)
+
+        if not media:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail='No media found for event')
+        
+        sb.generateSeq(media)
+        sboard =db.getStoryboardByEvent(req.eventID)
+
+        if not sboard:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail = 'Storyboard not created. no records found')
+        
+
+        outPutThat = ss.generateVideo(sboard, req.eventID)
+        return {
+            "event_id": req.eventID,
+            "user_id": req.userID,
+            "feeling": req.feeling,
+            "status": "generated",
+            "output_path": str(outPutThat) if outPutThat else None
+        }
+    
+    except HTTPException:
+        raise
+
+    except [Exception] as e:
+        logger.exception('Video Generation failed')
+    raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail= "Video Generation Failed") from e
+
+@app.post("/prompt/analyze")
+async def analyzePrompt(request: PromptRequest):
+    try:
+        bot = ChatBot.chatBotOpenAI()
+        result = bot.getResponse(request.prompt)
+
+        if not isinstance(result, dict):
+            return {
+                "allowed": False,
+                "out_of_scope": False,
+                "unsafe_or_invalid": True,
+                "reason": "The prompt analyzer returned data that was not a JSON object.",
+                "response": "Sorry, I could not understand that request."
+            }
+
+        result["event_id"] = request.eventID
+        result["user_id"] = request.userID
+        result["guest_id"] = request.guestID
+        result["original_prompt"] = request.prompt
+
+        inserted = db.insertPromptRequest(result)
+
+        return {
+            "event_id": request.eventID,
+            "user_id": request.userID,
+            "guest_id": request.guestID,
+            "inserted": inserted,
+            "analysis": result
+        }
+
+    except Exception as e:
+        logger.exception("Prompt analysis failed.")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Prompt analysis failed."
+        ) from e
+    
+if __name__ == "__main__":
+    uvicorn.run("mainAPI:app", host="127.0.0.1", port=8000, reload=True)
