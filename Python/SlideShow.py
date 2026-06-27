@@ -3,6 +3,8 @@ import cv2 as cv
 import numpy as np
 from moviepy import VideoFileClip, AudioFileClip
 import DBConn
+import AzureClass
+import tempfile
 
 class SlideShowGenerator:
     def __init__(self, outputDir: str = r'C:\CSI4999\Videos\Output', width: int = 1280, height: int = 720, fps: int = 30, secPerPhoto: int = 3):
@@ -12,6 +14,8 @@ class SlideShowGenerator:
         self.height = height
         self.fps = fps
         self.secPerPhoto = secPerPhoto
+        self.db = DBConn.SQLbuilder()
+        self.db.connect()
 
     def resizePadding(self, img: str):
         h,w = img.shape[:2]
@@ -73,48 +77,53 @@ class SlideShowGenerator:
 
             writer.write(displayFrame)
 
-    def generateVideo(self, storyboard, outputname="final_slideshow.mp4"):
+    def generateVideo(self, storyboard, eventID: int, outputname="final_slideshow.mp4", dType = 'photo_id'):
         if not storyboard:
             print("storyboard is empty")
             return None
         
-        outPutPath = self.outputDir / outputname
-
+        azure = AzureClass.blobHandler()
+    
         fourcc = cv.VideoWriter_fourcc(*"mp4v")
-        writer = cv.VideoWriter(str(outPutPath), fourcc, self.fps, (self.width, self.height))
-
-        usedCount = 0
-
-        for item in storyboard:
-            filePath = item.get('file_path')
-
-            if not filePath:
-                errMsg = "Skipping item with missing file_path."
-                print(errMsg)
-                continue
-
-            path = Path(filePath)
-
-            if not path.exists():
-                errMsg = f'File not found: {path}'
-                print(errMsg)
-                continue
-            
-            img = cv.imread(str(path))
-
-            if img is None:
-                errMsg = f'could not read image: {path}'
-                print(errMsg)
-                continue
-
-            frame = self.resizePadding(img)
-
-            frame = self.drawCaption(frame, item.get('scene_label', 'Scene'), item.get('reason', ''))
-
-            self.writeSlide(writer, frame)
-            usedCount += 1
         
-        writer.release()
+        
+        with tempfile.TemporaryDirectory() as tempDir:
+            outPutPath = Path(tempDir) / outputname
+            media = azure.downloadToTemp(storyboard, tempDir, dType)
+            writer = cv.VideoWriter(str(outPutPath), fourcc, self.fps, (self.width, self.height))
+            usedCount = 0
+
+            for item in media:
+                filePath = item.get('file_path')
+
+                if not filePath:
+                    errMsg = "Skipping item with missing file_path."
+                    print(errMsg)
+                    continue
+
+                path = Path(filePath)
+
+                if not path.exists():
+                    errMsg = f'File not found: {path}'
+                    print(errMsg)
+                    continue
+                
+                img = cv.imread(str(path))
+
+                if img is None:
+                    errMsg = f'could not read image: {path}'
+                    print(errMsg)
+                    continue
+
+                frame = self.resizePadding(img)
+
+                frame = self.drawCaption(frame, item.get('scene_label', 'Scene'), item.get('reason', ''))
+
+                self.writeSlide(writer, frame)
+                usedCount += 1
+            
+            writer.release()
+            self.testFinalVid(eventID,str(outPutPath) )
 
         if usedCount == 0:
             errMsg = 'No valid images were added to the video'
@@ -137,9 +146,52 @@ class SlideShowGenerator:
 
         return "C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3"
     
+    def testFinalVid(self, eventID, rawVideoPath):
+        if rawVideoPath:
+            musicPath = self.pickMusic(event_type="genral")
+
+            finalVideoPath = rf"C:\CSI4999\Videos\Output\event_{eventID}_slideshow_with_music.mp4"
+
+            if Path(musicPath).exists():
+                self.attachMusic(
+                    videoPath=rawVideoPath,
+                    musicPath=musicPath,
+                    outPutPath=finalVideoPath
+                )
+                musicID = self.db.insertMusic(
+    title="Wedding Background Track",
+    fileName="jonasblakewood-wedding-519603.mp3",
+    filePath=r"C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3",
+    artist="Jonas Blakewood",
+    eventType="general",
+    moodLabel="warm",
+    durationSeconds=0,
+    source="local file",
+    licenseType="project testing",
+    isActive=True
+)
+
+                print(f"Inserted music_id: {musicID}")
+                self.db.insertGeneratedVideo(
+    eventID=1,
+    fileName=Path(finalVideoPath).name,
+    filePath=finalVideoPath,
+    musicID=1,
+    title="Event 1 Final Slideshow",
+    videoType="slideshow",
+    status="completed",
+    durationSeconds=0,
+    width=1280,
+    height=720,
+    fps=30,
+    fileSize=Path(finalVideoPath).stat().st_size
+)
+                print(f"Final video created: {finalVideoPath}")
+            else:
+                print(f"Music file not found: {musicPath}")
+                print(f"Video without music created: {rawVideoPath}")
     def attachMusic(self, videoPath, musicPath, outPutPath):
-        db = DBConn.SQLbuilder()
-        db.connect()
+
         video = VideoFileClip(videoPath)
         music = AudioFileClip(musicPath)
 
@@ -169,53 +221,10 @@ def main():
         )
 
         rawVideoPath = generator.generateVideo(
-            storyboard,
+            storyboard, eventID=1,
             outputname=f"event_{eventID}_slideshow_no_music.mp4"
         )
 
-        if rawVideoPath:
-            musicPath = generator.pickMusic(event_type="genral")
-
-            finalVideoPath = rf"C:\CSI4999\Videos\Output\event_{eventID}_slideshow_with_music.mp4"
-
-            if Path(musicPath).exists():
-                generator.attachMusic(
-                    videoPath=rawVideoPath,
-                    musicPath=musicPath,
-                    outPutPath=finalVideoPath
-                )
-                musicID = db.insertMusic(
-    title="Wedding Background Track",
-    fileName="jonasblakewood-wedding-519603.mp3",
-    filePath=r"C:\CSI4999\Music\jonasblakewood-wedding-519603.mp3",
-    artist="Jonas Blakewood",
-    eventType="general",
-    moodLabel="warm",
-    durationSeconds=0,
-    source="local file",
-    licenseType="project testing",
-    isActive=True
-)
-
-                print(f"Inserted music_id: {musicID}")
-                db.insertGeneratedVideo(
-    eventID=1,
-    fileName=Path(finalVideoPath).name,
-    filePath=finalVideoPath,
-    musicID=1,
-    title="Event 1 Final Slideshow",
-    videoType="slideshow",
-    status="completed",
-    durationSeconds=0,
-    width=1280,
-    height=720,
-    fps=30,
-    fileSize=Path(finalVideoPath).stat().st_size
-)
-                print(f"Final video created: {finalVideoPath}")
-            else:
-                print(f"Music file not found: {musicPath}")
-                print(f"Video without music created: {rawVideoPath}")
 
 if __name__ == "__main__":
     main()
