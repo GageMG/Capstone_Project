@@ -2,12 +2,16 @@ fastapi
 uvicorn[standard]
 python-multipart
 python-dotenv
+pydantic
 pydantic-settings
 
 sqlalchemy
 alembic
 aiosqlite
 psycopg[binary]
+supabase
+
+azure-storage-blob
 
 pillow
 opencv-python
@@ -29,6 +33,7 @@ accelerate
 sentencepiece
 timm
 open-clip-torch
+openai
 
 pytest
 httpx
