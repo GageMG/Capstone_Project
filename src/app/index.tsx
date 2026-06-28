@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Alert,
   KeyboardAvoidingView,
@@ -11,6 +11,8 @@ import {
   View,
 } from "react-native";
 import FormModal, { FormField } from "@/components/FormModal";
+import { ThemeColors } from "@/theme/colors";
+import { useTheme } from "@/theme/ThemeContext";
 
 const API_URL = "http://127.0.0.1:8000";
 
@@ -31,13 +33,14 @@ const EVENT_FIELDS: FormField[] = [
 ];
 
 export default function WelcomeScreen() {
+  const { colors: c } = useTheme();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [modal, setModal] = useState<null | "account" | "event">(null);
   const [submitting, setSubmitting] = useState(false);
 
   const handleLogin = () => {
-    // Handle login logic here
     console.log("Login pressed", { username, password });
   };
 
@@ -80,7 +83,7 @@ export default function WelcomeScreen() {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={c.statusBar} />
 
       {/* Background geometric shapes */}
       <View style={styles.bgCircleLarge} />
@@ -108,7 +111,7 @@ export default function WelcomeScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your username"
-                placeholderTextColor="#8891A4"
+                placeholderTextColor={c.textMuted}
                 value={username}
                 onChangeText={setUsername}
                 autoCapitalize="none"
@@ -125,7 +128,7 @@ export default function WelcomeScreen() {
               <TextInput
                 style={styles.input}
                 placeholder="Enter your password"
-                placeholderTextColor="#8891A4"
+                placeholderTextColor={c.textMuted}
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry
@@ -198,197 +201,198 @@ export default function WelcomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#0D1117",
-    overflow: "hidden",
-  },
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: {
+      flex: 1,
+      backgroundColor: c.bg,
+      overflow: "hidden",
+    },
 
-  // Background decorative elements
-  bgCircleLarge: {
-    position: "absolute",
-    width: 420,
-    height: 420,
-    borderRadius: 210,
-    backgroundColor: "#1A2F5A",
-    top: -160,
-    right: -120,
-    opacity: 0.6,
-  },
-  bgCircleSmall: {
-    position: "absolute",
-    width: 200,
-    height: 200,
-    borderRadius: 100,
-    backgroundColor: "#0E4DA4",
-    bottom: 80,
-    left: -80,
-    opacity: 0.25,
-  },
-  bgAccentLine: {
-    position: "absolute",
-    width: 2,
-    height: 260,
-    backgroundColor: "#2563EB",
-    top: 120,
-    left: 28,
-    opacity: 0.3,
-    borderRadius: 2,
-  },
+    // Background decorative elements
+    bgCircleLarge: {
+      position: "absolute",
+      width: 420,
+      height: 420,
+      borderRadius: 210,
+      backgroundColor: c.decorLarge,
+      top: -160,
+      right: -120,
+      opacity: 0.6,
+    },
+    bgCircleSmall: {
+      position: "absolute",
+      width: 200,
+      height: 200,
+      borderRadius: 100,
+      backgroundColor: c.decorSmall,
+      bottom: 80,
+      left: -80,
+      opacity: 0.25,
+    },
+    bgAccentLine: {
+      position: "absolute",
+      width: 2,
+      height: 260,
+      backgroundColor: c.accentStrong,
+      top: 120,
+      left: 28,
+      opacity: 0.3,
+      borderRadius: 2,
+    },
 
-  inner: {
-    flex: 1,
-    justifyContent: "center",
-    paddingHorizontal: 28,
-    paddingTop: 20,
-  },
+    inner: {
+      flex: 1,
+      justifyContent: "center",
+      paddingHorizontal: 28,
+      paddingTop: 20,
+    },
 
-  // Header
-  header: {
-    marginBottom: 36,
-    paddingLeft: 4,
-  },
-  logoMark: {
-    fontSize: 22,
-    color: "#2563EB",
-    marginBottom: 16,
-  },
-  title: {
-    fontSize: 38,
-    fontWeight: "800",
-    color: "#F0F4FF",
-    letterSpacing: -1.2,
-    lineHeight: 44,
-    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
-  },
-  subtitle: {
-    fontSize: 15,
-    color: "#5A6A85",
-    marginTop: 6,
-    letterSpacing: 0.3,
-    fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
-  },
+    // Header
+    header: {
+      marginBottom: 36,
+      paddingLeft: 4,
+    },
+    logoMark: {
+      fontSize: 22,
+      color: c.accentStrong,
+      marginBottom: 16,
+    },
+    title: {
+      fontSize: 38,
+      fontWeight: "800",
+      color: c.textBright,
+      letterSpacing: -1.2,
+      lineHeight: 44,
+      fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+    },
+    subtitle: {
+      fontSize: 15,
+      color: c.textMuted,
+      marginTop: 6,
+      letterSpacing: 0.3,
+      fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
+    },
 
-  // Card
-  card: {
-    backgroundColor: "#161C27",
-    borderRadius: 20,
-    padding: 28,
-    borderWidth: 1,
-    borderColor: "#1E2A40",
-    shadowColor: "#000",
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.5,
-    shadowRadius: 30,
-    elevation: 16,
-  },
+    // Card
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: 20,
+      padding: 28,
+      borderWidth: 1,
+      borderColor: c.border,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 12 },
+      shadowOpacity: 0.5,
+      shadowRadius: 30,
+      elevation: 16,
+    },
 
-  // Fields
-  fieldGroup: {
-    marginBottom: 20,
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: "700",
-    color: "#3B82F6",
-    letterSpacing: 1.8,
-    marginBottom: 8,
-    fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
-  },
-  inputWrapper: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: "#0D1117",
-    borderRadius: 12,
-    borderWidth: 1.5,
-    borderColor: "#1E2A40",
-    paddingHorizontal: 14,
-  },
-  inputIcon: {
-    fontSize: 16,
-    color: "#3B4A62",
-    marginRight: 10,
-  },
-  input: {
-    flex: 1,
-    height: 50,
-    fontSize: 15,
-    color: "#E8EDF8",
-    fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
-  },
+    // Fields
+    fieldGroup: {
+      marginBottom: 20,
+    },
+    label: {
+      fontSize: 11,
+      fontWeight: "700",
+      color: c.accent,
+      letterSpacing: 1.8,
+      marginBottom: 8,
+      fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
+    },
+    inputWrapper: {
+      flexDirection: "row",
+      alignItems: "center",
+      backgroundColor: c.bg,
+      borderRadius: 12,
+      borderWidth: 1.5,
+      borderColor: c.border,
+      paddingHorizontal: 14,
+    },
+    inputIcon: {
+      fontSize: 16,
+      color: c.textFaint,
+      marginRight: 10,
+    },
+    input: {
+      flex: 1,
+      height: 50,
+      fontSize: 15,
+      color: c.textPrimary,
+      fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
+    },
 
-  // Login Button
-  loginButton: {
-    backgroundColor: "#2563EB",
-    borderRadius: 12,
-    height: 54,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: 8,
-    marginBottom: 28,
-    shadowColor: "#2563EB",
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.45,
-    shadowRadius: 14,
-    elevation: 8,
-    gap: 10,
-  },
-  loginButtonText: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: "#FFFFFF",
-    letterSpacing: 2.5,
-    fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
-  },
-  loginArrow: {
-    fontSize: 18,
-    color: "#93C5FD",
-  },
+    // Login Button
+    loginButton: {
+      backgroundColor: c.accentStrong,
+      borderRadius: 12,
+      height: 54,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      marginTop: 8,
+      marginBottom: 28,
+      shadowColor: c.accentStrong,
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.45,
+      shadowRadius: 14,
+      elevation: 8,
+      gap: 10,
+    },
+    loginButtonText: {
+      fontSize: 14,
+      fontWeight: "800",
+      color: "#FFFFFF",
+      letterSpacing: 2.5,
+      fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
+    },
+    loginArrow: {
+      fontSize: 18,
+      color: "#93C5FD",
+    },
 
-  // Bottom Links
-  linksRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 0,
-  },
-  linkButton: {
-    alignItems: "center",
-    paddingHorizontal: 16,
-  },
-  linkText: {
-    fontSize: 13.5,
-    color: "#93C5FD",
-    fontWeight: "600",
-    letterSpacing: 0.2,
-    fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
-  },
-  linkUnderline: {
-    height: 1,
-    backgroundColor: "#2563EB",
-    marginTop: 3,
-    width: "100%",
-    opacity: 0.5,
-  },
-  linkDivider: {
-    width: 1,
-    height: 20,
-    backgroundColor: "#1E2A40",
-  },
+    // Bottom Links
+    linksRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 0,
+    },
+    linkButton: {
+      alignItems: "center",
+      paddingHorizontal: 16,
+    },
+    linkText: {
+      fontSize: 13.5,
+      color: c.accent,
+      fontWeight: "600",
+      letterSpacing: 0.2,
+      fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
+    },
+    linkUnderline: {
+      height: 1,
+      backgroundColor: c.accentStrong,
+      marginTop: 3,
+      width: "100%",
+      opacity: 0.5,
+    },
+    linkDivider: {
+      width: 1,
+      height: 20,
+      backgroundColor: c.border,
+    },
 
-  // Footer
-  footerText: {
-    textAlign: "center",
-    color: "#3B4A62",
-    fontSize: 12,
-    marginTop: 32,
-    letterSpacing: 0.2,
-    fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
-  },
-  footerLink: {
-    color: "#4B6A9B",
-    fontWeight: "600",
-  },
-});
+    // Footer
+    footerText: {
+      textAlign: "center",
+      color: c.textFaint,
+      fontSize: 12,
+      marginTop: 32,
+      letterSpacing: 0.2,
+      fontFamily: Platform.OS === "ios" ? "Helvetica Neue" : "sans-serif",
+    },
+    footerLink: {
+      color: c.accent,
+      fontWeight: "600",
+    },
+  });

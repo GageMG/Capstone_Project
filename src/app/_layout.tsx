@@ -1,6 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { Tabs } from "expo-router";
 import { Platform, StyleSheet, View } from "react-native";
+import { ThemeProvider } from "@/theme/ThemeContext";
 
 function TabIcon({
   name,
@@ -32,8 +33,9 @@ function TabIcon({
 
 export default function TabLayout() {
   return (
-    <Tabs
-      screenOptions={{
+    <ThemeProvider>
+      <Tabs
+        screenOptions={{
         headerShown: false,
         tabBarStyle: styles.tabBar,
         tabBarItemStyle: {
@@ -96,7 +98,8 @@ export default function TabLayout() {
           ),
         }}
       />
-    </Tabs>
+      </Tabs>
+    </ThemeProvider>
   );
 }
 

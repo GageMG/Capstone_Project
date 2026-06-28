@@ -1,5 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Dimensions,
@@ -15,6 +15,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { ThemeColors } from "@/theme/colors";
+import { useTheme } from "@/theme/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
@@ -31,7 +33,7 @@ type Gallery = {
   photos: Photo[];
 };
 
-// Photo Lightbox
+// Photo Lightbox (media surface — always dark)
 function Lightbox({
   photos,
   startIndex,
@@ -145,6 +147,8 @@ function GalleryDetail({
   gallery: Gallery;
   onClose: () => void;
 }) {
+  const { colors: c } = useTheme();
+  const gd = useMemo(() => makeDetailStyles(c), [c]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const numCols = 3;
   const cellSize = (SCREEN_WIDTH - 4) / numCols;
@@ -152,11 +156,11 @@ function GalleryDetail({
   return (
     <Modal visible animationType="slide">
       <View style={gd.container}>
-        <StatusBar barStyle="light-content" />
+        <StatusBar barStyle={c.statusBar} />
         <SafeAreaView>
           <View style={gd.header}>
             <TouchableOpacity onPress={onClose} style={gd.backBtn}>
-              <Ionicons name="chevron-back" size={24} color="#F0F4FF" />
+              <Ionicons name="chevron-back" size={24} color={c.textBright} />
             </TouchableOpacity>
             <View style={gd.headerText}>
               <Text style={gd.title}>{gallery.title}</Text>
@@ -202,48 +206,49 @@ function GalleryDetail({
   );
 }
 
-const gd = StyleSheet.create({
-  container: { flex: 1, backgroundColor: "#0D1117" },
-  header: {
-    flexDirection: "row",
-    alignItems: "center",
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  backBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 10,
-    backgroundColor: "#161C27",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  headerText: { flex: 1 },
-  title: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: "#F0F4FF",
-    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
-    letterSpacing: -0.4,
-  },
-  meta: { fontSize: 12, color: "#5A6A85", marginTop: 2 },
-  accentDot: { width: 10, height: 10, borderRadius: 5 },
-  divider: {
-    height: 2,
-    marginHorizontal: 16,
-    borderRadius: 2,
-    opacity: 0.5,
-    marginBottom: 2,
-  },
-  grid: { gap: 2 },
-  cell: { overflow: "hidden" },
-  cellImage: { width: "100%", height: "100%" },
-  cellOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(13,17,23,0.1)",
-  },
-});
+const makeDetailStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    container: { flex: 1, backgroundColor: c.bg },
+    header: {
+      flexDirection: "row",
+      alignItems: "center",
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+      gap: 12,
+    },
+    backBtn: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      backgroundColor: c.surface,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    headerText: { flex: 1 },
+    title: {
+      fontSize: 18,
+      fontWeight: "800",
+      color: c.textBright,
+      fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+      letterSpacing: -0.4,
+    },
+    meta: { fontSize: 12, color: c.textMuted, marginTop: 2 },
+    accentDot: { width: 10, height: 10, borderRadius: 5 },
+    divider: {
+      height: 2,
+      marginHorizontal: 16,
+      borderRadius: 2,
+      opacity: 0.5,
+      marginBottom: 2,
+    },
+    grid: { gap: 2 },
+    cell: { overflow: "hidden" },
+    cellImage: { width: "100%", height: "100%" },
+    cellOverlay: {
+      ...StyleSheet.absoluteFillObject,
+      backgroundColor: "rgba(13,17,23,0.1)",
+    },
+  });
 
 // Gallery Card
 function GalleryCard({
@@ -253,6 +258,8 @@ function GalleryCard({
   gallery: Gallery;
   onPress: () => void;
 }) {
+  const { colors: c } = useTheme();
+  const gc = useMemo(() => makeCardStyles(c), [c]);
   return (
     <TouchableOpacity
       style={[gc.card, { width: CARD_WIDTH }]}
@@ -281,49 +288,52 @@ function GalleryCard({
   );
 }
 
-const gc = StyleSheet.create({
-  card: {
-    backgroundColor: "#161C27",
-    borderRadius: 14,
-    overflow: "hidden",
-    borderWidth: 1,
-    borderColor: "#1E2A40",
-  },
-  cover: { height: CARD_WIDTH * 0.75, width: "100%", overflow: "hidden" },
-  coverImage: { width: "100%", height: "100%", opacity: 0.85 },
-  badge: {
-    position: "absolute",
-    top: 8,
-    right: 8,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 20,
-  },
-  badgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
-  accentBar: {
-    position: "absolute",
-    bottom: 0,
-    left: 0,
-    right: 0,
-    height: 2,
-    opacity: 0.7,
-  },
-  info: { padding: 10 },
-  cardTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: "#E8EDF8",
-    letterSpacing: -0.2,
-    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
-  },
-  cardDate: { fontSize: 11, color: "#5A6A85", marginTop: 2 },
-});
+const makeCardStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    card: {
+      backgroundColor: c.surface,
+      borderRadius: 14,
+      overflow: "hidden",
+      borderWidth: 1,
+      borderColor: c.border,
+    },
+    cover: { height: CARD_WIDTH * 0.75, width: "100%", overflow: "hidden" },
+    coverImage: { width: "100%", height: "100%", opacity: 0.85 },
+    badge: {
+      position: "absolute",
+      top: 8,
+      right: 8,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 4,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      borderRadius: 20,
+    },
+    badgeText: { color: "#fff", fontSize: 10, fontWeight: "700" },
+    accentBar: {
+      position: "absolute",
+      bottom: 0,
+      left: 0,
+      right: 0,
+      height: 2,
+      opacity: 0.7,
+    },
+    info: { padding: 10 },
+    cardTitle: {
+      fontSize: 13,
+      fontWeight: "700",
+      color: c.textPrimary,
+      letterSpacing: -0.2,
+      fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+    },
+    cardDate: { fontSize: 11, color: c.textMuted, marginTop: 2 },
+  });
 
 // Gallery Screen
 export default function GalleryScreen() {
+  const { colors: c } = useTheme();
+  const styles = useMemo(() => makeStyles(c), [c]);
   const [galleries, setGalleries] = useState<Gallery[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -348,7 +358,7 @@ export default function GalleryScreen() {
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle={c.statusBar} />
       <View style={styles.container}>
 
         {/* Header */}
@@ -358,14 +368,14 @@ export default function GalleryScreen() {
             <Text style={styles.title}>Galleries</Text>
           </View>
           <TouchableOpacity style={styles.searchBtn}>
-            <Ionicons name="search" size={20} color="#5A6A85" />
+            <Ionicons name="search" size={20} color={c.textMuted} />
           </TouchableOpacity>
         </View>
 
         <Text style={styles.subtitle}>{galleries.length} saved events</Text>
 
         {loading ? (
-          <ActivityIndicator color="#3B82F6" style={{ marginTop: 40 }} />
+          <ActivityIndicator color={c.accent} style={{ marginTop: 40 }} />
         ) : error ? (
           <Text style={styles.errorText}>{error}</Text>
         ) : (
@@ -396,44 +406,55 @@ export default function GalleryScreen() {
   );
 }
 
-const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: "#0D1117" },
-  container: { flex: 1, backgroundColor: "#0D1117" },
-  header: {
-    flexDirection: "row",
-    alignItems: "flex-end",
-    justifyContent: "space-between",
-    paddingHorizontal: 24,
-    paddingTop: 20,
-    paddingBottom: 4,
-  },
-  eyebrow: {
-    fontSize: 10,
-    fontWeight: "700",
-    color: "#3B82F6",
-    letterSpacing: 2.5,
-    marginBottom: 4,
-  },
-  title: {
-    fontSize: 32,
-    fontWeight: "800",
-    color: "#F0F4FF",
-    letterSpacing: -1,
-    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
-  },
-  searchBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    backgroundColor: "#161C27",
-    borderWidth: 1,
-    borderColor: "#1E2A40",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 4,
-  },
-  subtitle: { fontSize: 13, color: "#3B4A62", paddingHorizontal: 24, marginBottom: 20 },
-  errorText: { color: "#F87171", textAlign: "center", marginTop: 40, paddingHorizontal: 24 },
-  grid: { paddingHorizontal: 20, paddingBottom: 24 },
-  row: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
-});
+const makeStyles = (c: ThemeColors) =>
+  StyleSheet.create({
+    safe: { flex: 1, backgroundColor: c.bg },
+    container: { flex: 1, backgroundColor: c.bg },
+    header: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      justifyContent: "space-between",
+      paddingHorizontal: 24,
+      paddingTop: 20,
+      paddingBottom: 4,
+    },
+    eyebrow: {
+      fontSize: 10,
+      fontWeight: "700",
+      color: c.accent,
+      letterSpacing: 2.5,
+      marginBottom: 4,
+    },
+    title: {
+      fontSize: 32,
+      fontWeight: "800",
+      color: c.textBright,
+      letterSpacing: -1,
+      fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+    },
+    searchBtn: {
+      width: 40,
+      height: 40,
+      borderRadius: 12,
+      backgroundColor: c.surface,
+      borderWidth: 1,
+      borderColor: c.border,
+      alignItems: "center",
+      justifyContent: "center",
+      marginBottom: 4,
+    },
+    subtitle: {
+      fontSize: 13,
+      color: c.textFaint,
+      paddingHorizontal: 24,
+      marginBottom: 20,
+    },
+    errorText: {
+      color: c.danger,
+      textAlign: "center",
+      marginTop: 40,
+      paddingHorizontal: 24,
+    },
+    grid: { paddingHorizontal: 20, paddingBottom: 24 },
+    row: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+  });
