@@ -5,7 +5,7 @@ export default function CameraWebFallback() {
   return (
     <View style={styles.container}>
       <View style={styles.iconRing}>
-        <Ionicons name="camera-off-outline" size={36} color="#3B4A62" />
+        <Ionicons name="camera-outline" size={36} color="#3B4A62" />
       </View>
       <Text style={styles.title}>Camera Unavailable</Text>
       <Text style={styles.body}>
