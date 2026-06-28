@@ -1,8 +1,10 @@
 import os
-from supabase import create_client, Client
+from typing import Optional
+
 from dotenv import load_dotenv
 from ProjectHelper import Helpers as ph
-from typing import Optional
+from supabase import Client, create_client
+
 
 class SQLbuilder:
     def __init__(self):
@@ -695,6 +697,52 @@ class SQLbuilder:
             result["videos"] = videos.data
 
         return result
+
+    def insertUser(self, user_data: dict):
+        try:
+            result = (
+                self.client
+                .table("app_user")
+                .insert(user_data)
+                .execute()
+            )
+
+            if result.data:
+                return result.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"Error creating user: {e}")
+            return None
+    
+    def getUserPWD(self, email: str = None, userName: str = None):
+        try:
+            if not email and not userName:
+                print("Email or username is required.")
+                return None
+
+            query = (
+                self.client
+                .table("app_user")
+                .select('*')
+            )
+
+            if email:
+                query = query.eq("email", email)
+            elif userName:
+                query = query.eq("user_name", userName)
+
+            result = query.execute()
+
+            if result.data:
+                return result.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"Error getting user password: {e}")
+            return None
     
 if __name__ == "__main__":
     db = SQLbuilder()

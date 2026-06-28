@@ -1,24 +1,28 @@
-import fastapi
-from fastapi import File, UploadFile, Form, HTTPException, Depends, Query, status
-import qrGen
-from pydantic import BaseModel, Field
-from typing import List
-import DBConn
-import AzureClass
-from pathlib import Path
-from DataStruct import uploadResults as dc
-from dataclasses import asdict
-import newRunner
-import StoryBoard
-import SlideShow
-import uvicorn
-import ChatBot
-import logging
 import json
+import logging
+from dataclasses import asdict
+from pathlib import Path
+from typing import List
 
+import AzureClass
+import ChatBot
+import DataStruct as dc
+import DBConn
+import fastapi
+import newRunner
+import qrGen
+import SlideShow
+import StoryBoard
+import UserClass
+import uvicorn
+from fastapi import (Depends, File, Form, HTTPException, Query, UploadFile,
+                     status)
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger('MainAPI')
 logging.basicConfig(level=logging.INFO)
+
+uc = UserClass.Users()
 
 blob = AzureClass.blobHandler()
 db = DBConn.SQLbuilder()
@@ -103,7 +107,7 @@ async def uploadPhotos(eventID:int = Form(...), userID:int = Form(...), files: L
 
         try:
             res = await blob.fileUpload(file, eventID, fType)
-            saved.append(asdict(dc(res["original_name"],"saved", fType, res["size_bytes"], res["url"], res["blob_name"], 'success', res["content_type"] )))
+            saved.append(asdict(dc.uploadResults(res["original_name"],"saved", fType, res["size_bytes"], res["url"], res["blob_name"], 'success', res["content_type"] )))
             print(f'File: {res["url"]}, Size: {res["size_bytes"]} bytes, Type: {fType}')
 
    
@@ -229,7 +233,29 @@ async def getMedia(req: mediaModel):
             detail=f"Error getting media: {e}"
         )
 
-    
+@app.post("/users/create", response_model=dc.userResponse)
+async def create_user(user: dc.userCreate):
+    created_user = uc.createUser(user)
+
+    if not created_user:
+        raise HTTPException(
+            status_code=400,
+            detail="User could not be created."
+        )
+
+    return created_user
+
+@app.post("/users/login",response_model=dc.userResponse)
+async def loginUser(login: dc.userLogin):
+    user = uc.loginUser(login)
+
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid email/username or password."
+        )
+
+    return user
     
 if __name__ == "__main__":
     uvicorn.run("mainAPI:app", host="127.0.0.1", port=8000, reload=True)
