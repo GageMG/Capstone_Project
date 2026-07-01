@@ -35,8 +35,9 @@ class Users:
     def getUserData(self, userID:int):
         return self.db.getUserInfo(userID)
     
-    def loginUser(self, login: ds.userLogin ):
+    def loginUser(self, login: ds.userLogin) -> int:
         user = self.db.getUserPWD(login.email, login.user_name)
+
 
         if not user:
             print('Record not found') 
@@ -47,14 +48,12 @@ class Users:
         user.pop("password_hash", None)
 
         if not isValid:
-            user.clear()
-            del dataDict   
             print('Invalid password')
             return None
 
-        userData = self.db.getUserInfo(user["user_id"])
+        #userData = self.db.getUserInfo(user["user_id"])
         print('Valid password')
-        return userData
+        return user["user_id"]
 
 
 if __name__ == "__main__":

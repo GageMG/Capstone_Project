@@ -62,26 +62,62 @@ class SQLbuilder:
 
         return self.insertToDB(values, table)
 
-    def getQRToken(self, token: str):
+    def incrementQRUploadCount(self, token: str, amount: int = 1):
         if token is None or token.strip() == "":
-            return False, "Missing Token"
+            return False
 
         try:
+            qr = self.getQRToken(token)
+
+            if not qr:
+                return False
+
+            current_count = qr.get("upload_count", 0)
+
             result = (
-                self.client.table("qrcodes")
-                .select("*")
+                self.client
+                .table("qrcodes")
+                .update({"upload_count": current_count + amount})
                 .eq("token", token.strip())
                 .execute()
             )
 
+            return bool(result.data)
+
+        except Exception as e:
+            print(f"Error incrementing QR upload count: {e}")
+            return False
+
+
+    def getQRToken(self, token: str, eventID: int = None):
+        if token is None or token.strip() == "":
+            return None
+
+        try:
+            query = (
+                self.client
+                .table("qrcodes")
+                .select(
+                    "qr_code_id, event_id, image_url, token, is_active, "
+                    "expires_at, max_uploads, upload_count, created, purpose"
+                )
+                .eq("token", token.strip())
+            )
+
+            if eventID is not None:
+                query = query.eq("event_id", eventID)
+
+            result = query.execute()
+
             rows = result.data
+
             if not rows:
                 return None
 
             return rows[0]
 
         except Exception as e:
-            print(f'Error Occurred: {e}')
+            print(f"Error getting QR token: {e}")
             return None
 
     def insertPreFilter(self, results: list[dict], dtype: str = 'photo_id'):

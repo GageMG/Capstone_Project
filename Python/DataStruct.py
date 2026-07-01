@@ -118,6 +118,7 @@ class QRRequest(BaseModel):
     is_active: bool = True
 
 class validateToken(BaseModel):
+    event_id: int
     token: str
 
 class mediaModel(BaseModel):
@@ -129,7 +130,7 @@ class eventModify(BaseModel):
     type: str | None = None
     event_date: datetime | None = None
 
-    status: Literal["active", "inactive", "completed", "cancelled"] | None = None
+    status: Literal["active", "inactive", "completed", "cancelled", "hide"] | None = None
 
     # only send this if changing password
     password: str | None = None
@@ -146,3 +147,7 @@ class eventLocationModify(BaseModel):
     zip: str | None = None
 
     searchable: bool | None = None
+
+class tokenReturn(BaseModel):
+    access_token: str
+    token_type: str = "bearer"

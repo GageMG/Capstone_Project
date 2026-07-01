@@ -1,24 +1,25 @@
 import logging
 import os
-from dataclasses import asdict
 from logging.handlers import RotatingFileHandler
-from pathlib import Path
-from typing import List, Optional
+from typing import List
 
+import Auth
 import AzureClass
 import ChatBot
 import DataStruct as dc
 import DBConn
 import EventsClass
 import fastapi
+import jwt
 import newRunner
 import qrGen
 import SlideShow
 import StoryBoard
+import Uploads
 import UserClass
 import uvicorn
-from fastapi import File, Form, HTTPException, UploadFile, status
-from pydantic import BaseModel, Field
+from fastapi import Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.security import OAuth2PasswordBearer
 
 LOG_DIR = "logs"
 os.makedirs(LOG_DIR, exist_ok=True)
@@ -35,6 +36,8 @@ console_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name
 logger.addHandler(file_handler)
 logger.addHandler(console_handler)
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+authMang = Auth.Auth()
 
 blob = AzureClass.blobHandler()
 db = DBConn.SQLbuilder()
@@ -45,12 +48,56 @@ ev = EventsClass.Manager(db=db)
 qrCode = qrGen.genQR(db=db)
 
 app = fastapi.FastAPI()
+uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
+
+def getCurrentUserID(token: str = Depends(oauth2_scheme)) -> int:
+    credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Could not validate credentials.",headers={"WWW-Authenticate": "Bearer"},)
+ 
+    try:
+        payload = authMang.decodeToken(token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED,detail="Token has expired.",headers={"WWW-Authenticate": "Bearer"},) from None
+    except jwt.InvalidTokenError:
+        raise credentials_exception from None
+ 
+    user_id_str = payload.get("sub")
+    if user_id_str is None:
+        raise credentials_exception
+ 
+    try:
+        return int(user_id_str)
+    except ValueError:
+        raise credentials_exception from None
+    
+def verifyEventOwner(eventID: int, current_user_id: int) -> dict:
+    event = ev.getEventByID(eventID)
+
+    if not event:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Event not found.")
+
+    owner_id = event.get("user_id") or event.get("owner_id")
+
+    if owner_id != current_user_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail="You do not have access to this event.")
+
+    return event
+
+def verifyGuestQRCode(eventID: int, qrToken: str):
+    if not qrToken:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="QR token is required.")
+
+    valid, reason = qrCode.validateQRcode(eventID=eventID, token=qrToken)
+
+    if not valid:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=reason or "Invalid or expired QR code.")
+
+    return True
 
 @app.post('/qr/generate')
 async def createQR(req: dc.QRRequest):
-
+    verifyEventOwner(req.eventID, getCurrentUserID)
     qrCode.generateUrl(req.eventID)
-    result = qrCode.generateQRcode(req.expirationDate, req.maxUploads, req.purpose, req.is_active)
+    result = qrCode.generateQRcode(req.eventID, req.expirationDate, req.maxUploads, req.purpose, req.is_active)
 
     return {
             "event_id": req.eventID,
@@ -62,142 +109,32 @@ async def createQR(req: dc.QRRequest):
 @app.get('/qr/validate')
 async def validateQR(req: dc.validateToken):
 
-
-    valid, reason = qrCode.validateQRcode(req.eventID)
+    valid, reason = qrCode.validateQRcode(req.event_id, req.token)
 
     print(valid, reason)
     return {"eventID": req.eventID, "valid": valid, "reason": reason}
 
-@app.get('/users/me')
-async def readUserMe():
-    return {'userID': "The Current User"}
-
-@app.get('/users/{userID}')
-async def readUser(userID : str):
-    return{'userID': userID}
-
 #API endpoint for the upload function
-@app.post("/upload")
-async def uploadPhotos(eventID: int = Form(...),userID: Optional[int] = Form(None),guestID: Optional[int] = Form(None),files: List[UploadFile] = File(...)):
-    if userID is None and guestID is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Either userID or guestID is required."
-        )
+@app.post("/upload/user")
+async def uploadUserPhotos(eventID: int = Form(...),files: List[UploadFile] = File(...),current_user_id: int = Depends(getCurrentUserID)):
 
-    photosExt = (".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic")
-    vidExt = (".mp4", ".avi", ".mov", ".wmv", ".flv", ".webm", ".mkv")
+    verifyEventOwner(eventID, current_user_id)
 
-    saved = []
+    return await uploadManager.upload_files(eventID=eventID,userID=current_user_id,guestID=None,files=files)
 
-    for file in files:
-        orgName = Path(file.filename or "unknown_file").name
-        suffix = Path(orgName).suffix.lower()
+@app.post("/upload/guest")
+async def uploadGuestPhotos(eventID: int = Form(...),qrToken: str = Form(...),guestID: int = Form(...),files: List[UploadFile] = File(...)):
+    verifyGuestQRCode(eventID, qrToken)
 
-        if suffix in photosExt:
-            fType = "photo"
-        elif suffix in vidExt:
-            fType = "video"
-        else:
-            saved.append(
-                asdict(
-                    dc.uploadResults(file_name=orgName,status="skipped",reason="Unsupported file type")
-                )
-            )
-            continue
+    res = await uploadManager.upload_files(eventID=eventID,userID=None,guestID=guestID,files=files)
 
-        try:
-            res = await blob.fileUpload(file, eventID, fType)
+    if res["uploaded"] > 0:
+        db.incrementQRUploadCount(qrToken, res["uploaded"])
 
-            saved.append(
-                asdict(
-                    dc.uploadResults(
-                        file_name=res["original_name"],
-                        status="saved",
-                        file_type=fType,
-                        size_bytes=res["size_bytes"],
-                        url=res["url"],
-                        blob_name=res["blob_name"],
-                        reason="success",
-                        content_type=res["content_type"]
-                    )
-                )
-            )
-
-            print(f'File: {res["url"]} Size: {res["size_bytes"]} bytes, Type: {fType}')
-
-        except Exception as e:
-            saved.append(
-                asdict(
-                    dc.uploadResults(
-                        file_name=orgName,
-                        status="failed",
-                        reason=str(e)
-                    )
-                )
-            )
-
-    uploadRows = []
-
-    for item in saved:
-        if item["status"] != "saved":
-            continue
-
-        uploadRows.append(
-            {
-                "event_id": eventID,
-                "user_id": userID,
-                "guest_id": guestID,
-                "original_file_name": item["file_name"],
-                "blob_name": item["blob_name"],
-                "file_path": item["url"],
-                "media_type": item["file_type"],
-                "mime_type": item["content_type"],
-                "file_size": item["size_bytes"],
-                "upload_status": "uploaded",
-                "processing_status": "not_started"
-            }
-        )
-
-    if not uploadRows:
-        return {
-            "event_id": eventID,
-            "user_id": userID,
-            "guest_id": guestID,
-            "uploaded": 0,
-            "db_records_inserted": 0,
-            "photo_records_inserted": 0,
-            "video_records_inserted": 0,
-            "results": saved
-        }
-
-    inserted = db.insertUploads(uploadRows)
-
-    if not inserted:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Files uploaded to Azure, but database insert failed."
-        )
-
-    mediaInserts = db.insertMediaRecordsFromUploads(inserted)
-
-    if not mediaInserts:
-        mediaInserts = {"photos": [], "videos": []}
-
-    return {
-        "event_id": eventID,
-        "user_id": userID,
-        "guest_id": guestID,
-        "uploaded": len([item for item in saved if item["status"] == "saved"]),
-        "db_records_inserted": len(inserted),
-        "photo_records_inserted": len(mediaInserts["photos"]),
-        "video_records_inserted": len(mediaInserts["videos"]),
-        "results": saved
-    }
-  
 @app.post("/video/generate")
 async def generateVideo(req: dc.MakeVideoRequest):
     try:
+        verifyEventOwner(req.eventID, getCurrentUserID)
         ss = SlideShow.SlideShowGenerator(db=db)
         sb = StoryBoard.StoryBoardGen(db=db)
         
@@ -232,6 +169,7 @@ async def generateVideo(req: dc.MakeVideoRequest):
 @app.post("/prompt/analyze")
 async def analyzePrompt(request: dc.PromptRequest):
     try:
+        verifyEventOwner(request.eventID, getCurrentUserID)
         bot = ChatBot.chatBotOpenAI()
         result = bot.getResponse(request.prompt)
 
@@ -269,6 +207,7 @@ async def analyzePrompt(request: dc.PromptRequest):
 @app.post('/media/allmedia')
 async def getMedia(req: dc.mediaModel):
     try:
+        verifyEventOwner(req.eventID, getCurrentUserID)
         media = db.getAllMedia(eventID=req.eventID,dataType=req.dataType)
 
         return {
@@ -301,17 +240,16 @@ async def create_user(user: dc.userCreate):
 
     return created_user
 
-@app.post("/users/login",response_model=dc.userResponse)
+@app.post("/users/login",response_model=dc.tokenReturn)
 async def loginUser(login: dc.userLogin):
     user = uc.loginUser(login)
 
-    if not user:
-        raise HTTPException(
-            status_code=401,
-            detail="Invalid email/username or password."
-        )
+    if user is None:
+        raise HTTPException(status_code=401,detail="Invalid email/username or password.")
+    
+    token = authMang.createAccessToken(user)
 
-    return user
+    return {"access_token": token, "token_type": "bearer"}
 
 @app.post("/events/create")
 def create_event(event: dc.eventCreate, location: dc.eventLocation):
@@ -362,7 +300,7 @@ def getLocID(locationID: int):
 
 @app.get("/events/{eventID}")
 def getEvent(eventID: int):
-
+    verifyEventOwner(eventID, getCurrentUserID)
     result = ev.getEventByID(eventID)
 
     if not result:
@@ -376,8 +314,9 @@ def getEvent(eventID: int):
         "event": result
     }
 
-@app.patch("/events/{eventID}")
+@app.patch("/events/modify{eventID}")
 def modifyEvent(eventID: int, event: dc.eventModify):
+    verifyEventOwner(eventID, getCurrentUserID)
 
     result = ev.modifyEvent(eventID=eventID, event=event)
 

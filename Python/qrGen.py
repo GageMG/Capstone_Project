@@ -1,7 +1,8 @@
 import logging
 import secrets
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import urlencode
 
 import DBConn
 import qrcode
@@ -12,8 +13,8 @@ class genQR():
     def __init__(self, db= None, path = "http://localhost:8000"):
         self.baseUrl = path
         self.fullUrl = None
-        self.eventID = None
-        self.token = None
+
+
         self.localTesting = Path(r"C:\CSI4999\qrCodes")
         if db is None:
             log.warning("EventsClass.Manager created its own DB connection — db was not injected")
@@ -27,17 +28,26 @@ class genQR():
        tokLen = 32
        return secrets.token_urlsafe(tokLen)
     
-    def generateUrl(self, eventID: str):
+    def generateUrl(self, eventID: int, token: str) -> str:
         if eventID is None:
-            raise ValueError('Event ID is empty')
-        self.eventID = eventID
-        self.token = self.genToken()
+            raise ValueError("Event ID is empty")
 
-        self.fullUrl = f'{self.baseUrl}/upload?token={self.token}'
+        if not token:
+            raise ValueError("Token is empty")
 
-    def generateQRcode(self, expirationDate, maxUpload, purpose = "guests", setActive = True):
-        if self.fullUrl is None or self.eventID is None:
-            raise ValueError('URL must be generated')
+        query = urlencode(
+            {
+                "eventID": eventID,
+                "qrToken": token
+            }
+        )
+
+    def generateQRcode(self, eventID:int, expirationDate, maxUpload, purpose = "guests", setActive = True):
+        if eventID is None:
+            raise ValueError("Event ID is required")
+        
+        token = self.genToken()
+        fullUrl = self.generateUrl(eventID=eventID, token=token)
         
         qrPath = self.localTesting / f"event_{self.eventID}_qr.png"
 
@@ -46,30 +56,60 @@ class genQR():
 
         expires = datetime.strptime(expirationDate, "%m/%d/%y")
 
-        self.db.postQRtoDB(eventID= self.eventID, url=str(qrPath), token= self.token, expires_at= expires.isoformat(), max_upload= maxUpload, purpose=purpose, is_active = setActive)
+        self.db.postQRtoDB(eventID= eventID, url=str(qrPath), token= self.token, expires_at= expires.isoformat(), max_upload= maxUpload, purpose=purpose, is_active = setActive)
 
-        return qrPath
+        return {
+            "event_id": eventID,
+            "qr_path": str(qrPath),
+            "qr_url": fullUrl,
+            "token": token,
+            "expires_at": expires.isoformat(),
+            "max_uploads": maxUpload,
+            "purpose": purpose,
+            "is_active": setActive
+        }
     
-    def validateQRcode(self, tokenID: str):
-        if self.token is None or self.token.strip == "":
+    def validateQRcode(self, eventID: int, token:str):
+        if token is None or token.strip == "":
             return False, "Missing Token"
+        
+        if eventID is None:
+            return False, "Missing event ID"
 
-        qrToken = self.db.getQRToken(token= tokenID)
+        qrToken = self.db.getQRToken(token=token)
 
         if qrToken is None:
             return False, "No Data"
         
-        if not qrToken["is_active"]:
-            return False, "QR_Token not active"
-        
-        if qrToken["expires_at"] is not None:
-            expires = datetime.fromisoformat(qrToken["expires_at"])
+        tokenEventID = qrToken.get("event_id")
 
-            if datetime.now() > expires:
+        if tokenEventID is None:
+            return False, "QR token is missing event ID"
+
+        if int(tokenEventID) != int(eventID):
+            return False, "QR token does not match this event"
+
+        if not qrToken.get("is_active", False):
+            return False, "QR token is not active"
+
+        expires_at = qrToken.get("expires_at")
+
+        if expires_at is not None:
+            expires = datetime.fromisoformat(str(expires_at))
+
+            if expires.tzinfo is None:
+                now = datetime.now()
+            else:
+                now = datetime.now(timezone.utc)
+
+            if now > expires:
                 return False, "QR code expired"
 
-        if qrToken["max_uploads"] is not None:
-            if qrToken["upload_count"] >= qrToken["max_uploads"]:
+        max_uploads = qrToken.get("max_uploads")
+        upload_count = qrToken.get("upload_count", 0)
+
+        if max_uploads is not None:
+            if int(upload_count) >= int(max_uploads):
                 return False, "Upload limit reached"
 
         return True, "QR code is valid"
