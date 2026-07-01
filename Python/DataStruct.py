@@ -68,12 +68,10 @@ class eventCreate(BaseModel):
     name: str
     type: str
     event_date: datetime
-    location_id: int
+   # location_id: int
 
-    # table default is active
     status: Literal["active", "inactive", "completed", "cancelled"] = "active"
 
-    # Better to accept plain password here, then hash it before DB insert
     password: str
 
     uploads_enabled: bool = True
@@ -87,7 +85,6 @@ class eventLocation(BaseModel):
     zip: str
 
     searchable: bool = False
-    uploads_active: bool = False
 
 class uploadModel(BaseModel):
     eventID: int = Field(..., gt=0)
@@ -126,3 +123,26 @@ class validateToken(BaseModel):
 class mediaModel(BaseModel):
     eventID: int
     dataType: str
+
+class eventModify(BaseModel):
+    name: str | None = None
+    type: str | None = None
+    event_date: datetime | None = None
+
+    status: Literal["active", "inactive", "completed", "cancelled"] | None = None
+
+    # only send this if changing password
+    password: str | None = None
+
+    uploads_enabled: bool | None = None
+    upload_limit: int | None = Field(default=None, ge=0)
+
+
+class eventLocationModify(BaseModel):
+    venue_name: str | None = None
+    street: str | None = None
+    city: str | None = None
+    state: str | None = None
+    zip: str | None = None
+
+    searchable: bool | None = None

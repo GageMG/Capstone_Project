@@ -752,8 +752,185 @@ class SQLbuilder:
                  .execute())
 
         return query.data[0] if query.data else None
-
     
+    def eventCreate(self, eventData: dict):
+        try:
+            result = (
+                self.client
+                .table("event")
+                .insert(eventData)
+                .execute()
+            )
+
+            if result.data:
+                return result.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"Error creating event: {e}")
+            return None
+            
+    def locationCreate(self, location: dict):
+        try:
+            res = (
+                self.client
+                .table('location')
+                .insert(location)
+                .execute()
+            )
+            if res.data:
+                return res.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"Error creating event location: {e}")
+            return None
+        
+    def locationGetAll(self):
+        try:
+            result = (
+                self.client
+                .table("location")
+                .select(
+                    "location_id, venue_name, street, city, state, zip, searchable"
+                )
+                .order("venue_name", desc=False)
+                .execute()
+            )
+
+            return result.data
+
+        except Exception as e:
+            print(f"Error getting locations: {e}")
+            return None
+        
+    def locationGetByID(self, locationID: int):
+        try:
+            result = (
+                self.client
+                .table("location")
+                .select("*")
+                .eq("location_id", locationID)
+                .single()
+                .execute()
+            )
+
+            return result.data
+
+        except Exception as e:
+            print(f"Error getting location: {e}")
+            return None
+        
+    def eventGetAllByUser(self, userID: int):
+        try:
+            result = (
+                self.client
+                .table("event")
+                .select(
+                    """
+                    event_id,
+                    user_id,
+                    name,
+                    type,
+                    event_date,
+                    location_id,
+                    status,
+                    uploads_enabled,
+                    upload_limit,
+                    created_at,
+                    last_updated
+                    """
+                )
+                .eq("user_id", userID)
+                .order("event_date", desc=False)
+                .execute()
+            )
+
+            return result.data
+
+        except Exception as e:
+            print(f"Error getting user events: {e}")
+            return None
+        
+    def eventGetByID(self, eventID: int):
+        try:
+            result = (
+                self.client
+                .table("event")
+                .select(
+                    """
+                    event_id,
+                    user_id,
+                    name,
+                    type,
+                    event_date,
+                    location_id,
+                    status,
+                    uploads_enabled,
+                    upload_limit,
+                    created_at,
+                    last_updated,
+                    location:location_id (
+                        location_id,
+                        venue_name,
+                        street,
+                        city,
+                        state,
+                        zip,
+                        searchable
+                    )
+                    """
+                )
+                .eq("event_id", eventID)
+                .single()
+                .execute()
+            )
+
+            return result.data
+
+        except Exception as e:
+            print(f"Error getting event: {e}")
+            return None
+        
+    def eventModify(self, eventID: int, eventData: dict):
+        try:
+            result = (
+                self.client
+                .table("event")
+                .update(eventData)
+                .eq("event_id", eventID)
+                .execute()
+            )
+
+            if result.data:
+                return result.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"Error modifying event: {e}")
+            return None
+    
+    def locationModify(self, locationID: int, locData: dict):
+        try:
+            result = (
+                self.client
+                .table("location")
+                .update(locData)
+                .eq("location_id", locationID)
+                .execute()
+            )
+
+            if result.data:
+                return result.data[0]
+
+            return None
+
+        except Exception as e:
+            print(f"Error modifying location: {e}")
+            return None
 if __name__ == "__main__":
     db = SQLbuilder()
     if db.connect():

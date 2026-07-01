@@ -1,23 +1,23 @@
+import logging
+
 import DataStruct as ds
 import DBConn
-from pwdlib import PasswordHash
+from ProjectHelper import Helpers as ph
 
+log = logging.getLogger(__name__)
 
 class Users:
-    def __init__(self):
-        self.db = DBConn.SQLbuilder()
-        self.db.connect()
-        self.pwhash = PasswordHash.recommended()
-
-    def hashPWD(self, pwd: str) -> str:
-        return self.pwhash.hash(pwd)
-    
-    def verifyPWD(self, userPWD: str, hashedPWD) -> bool:
-        return self.pwhash.verify(userPWD, hashedPWD)
-        
+    def __init__(self, db=None):
+        if db == None:
+            log.warning("EventsClass.Manager created its own DB connection — db was not injected")
+            self.db = DBConn.SQLbuilder()
+            self.db.connect()
+        else:
+            self.db = db
+  
     def createUser(self, user: ds.userCreate):
         userData = user.model_dump(exclude={"pwd"})
-        userData["password_hash"] = self.hashPWD(user.pwd)
+        userData["password_hash"] = ph.hashPwd(user.pwd)
         
         res = self.db.insertUser(userData)
 
@@ -42,7 +42,7 @@ class Users:
             print('Record not found') 
             return None
         
-        isValid = self.verifyPWD(login.pwd, user['password_hash'])
+        isValid = ph.verifyPwd(login.pwd, user['password_hash'])
 
         user.pop("password_hash", None)
 
@@ -56,19 +56,20 @@ class Users:
         print('Valid password')
         return userData
 
-if __name__ == "__main__":
-    # testUser = ds.userCreate(
-    #     user_name="testuser100",
-    #     first_name="Test",
-    #     last_name="User",
-    #     email="testuser5@example.com",
-    #     phone="555-555-5555",
-    #     role="user",
-    #     pwd="TestPassword123!"
-    # )
 
-    test = ds.userLogin(email= "testuser5@example.com", pwd="TestPassword123!")
+if __name__ == "__main__":
+    testUser = ds.userCreate(
+        user_name="testuser100",
+        first_name="Test",
+        last_name="User",
+        email="testuser5@example.com",
+        phone="555-555-5555",
+        role="user",
+        pwd="TestPassword123!"
+    )
+
+    #test = ds.userLogin(email= "testuser5@example.com", pwd="TestPassword123!")
     userService = Users()
-    #res = userService.createUser(testUser)
-    result = userService.loginUser(test)
-    print(result)
+    res = userService.createUser(testUser)
+    #result = userService.loginUser(test)
+    print(res)

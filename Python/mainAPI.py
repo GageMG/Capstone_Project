@@ -1,6 +1,7 @@
-import json
 import logging
+import os
 from dataclasses import asdict
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import List, Optional
 
@@ -8,6 +9,7 @@ import AzureClass
 import ChatBot
 import DataStruct as dc
 import DBConn
+import EventsClass
 import fastapi
 import newRunner
 import qrGen
@@ -15,53 +17,41 @@ import SlideShow
 import StoryBoard
 import UserClass
 import uvicorn
-from fastapi import (Depends, File, Form, HTTPException, Query, UploadFile,
-                     status)
+from fastapi import File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel, Field
 
-logger = logging.getLogger('MainAPI')
-logging.basicConfig(level=logging.INFO)
+LOG_DIR = "logs"
+os.makedirs(LOG_DIR, exist_ok=True)
 
-uc = UserClass.Users()
+logger = logging.getLogger("MainAPI")
+logger.setLevel(logging.INFO)
+
+file_handler = RotatingFileHandler(os.path.join(LOG_DIR, "mainapi.log"), maxBytes=10_000_000, backupCount=5)
+file_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+console_handler = logging.StreamHandler()
+console_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
+
+logger.addHandler(file_handler)
+logger.addHandler(console_handler)
+
 
 blob = AzureClass.blobHandler()
 db = DBConn.SQLbuilder()
 db.connect()
 
+uc = UserClass.Users(db=db)
+ev = EventsClass.Manager(db=db)
+qrCode = qrGen.genQR(db=db)
 
-class PromptRequest(BaseModel):
-    eventID: int = Field(..., gt=0)
-    userID: int = Field(..., gt=0)
-    guestID: int | None = None
-    prompt: str = Field(..., min_length=1, max_length=1000)
-
-
-# class MakeVideoRequest(BaseModel):
-#     eventID: int
-#     userID: int
-#     feeling: str
- 
-    
-# class QRRequest(BaseModel):
-#     eventID: int
-#     expirationDate: str
-#     maxUploads: int = 50
-#     purpose: str = "guests"
-#     is_active: bool = True
-
-# class Validate(BaseModel):
-#     token: str
-
-# class mediaModel(BaseModel):
-#     eventID: int
-#     dataType: str
 app = fastapi.FastAPI()
 
 @app.post('/qr/generate')
 async def createQR(req: dc.QRRequest):
-    qrCode = qrGen.genQR()
+
     qrCode.generateUrl(req.eventID)
     result = qrCode.generateQRcode(req.expirationDate, req.maxUploads, req.purpose, req.is_active)
+
     return {
             "event_id": req.eventID,
             "status": "created",
@@ -71,8 +61,10 @@ async def createQR(req: dc.QRRequest):
 
 @app.get('/qr/validate')
 async def validateQR(req: dc.validateToken):
-    qrCode = qrGen.genQR()
+
+
     valid, reason = qrCode.validateQRcode(req.eventID)
+
     print(valid, reason)
     return {"eventID": req.eventID, "valid": valid, "reason": reason}
 
@@ -86,12 +78,7 @@ async def readUser(userID : str):
 
 #API endpoint for the upload function
 @app.post("/upload")
-async def uploadPhotos(
-    eventID: int = Form(...),
-    userID: Optional[int] = Form(None),
-    guestID: Optional[int] = Form(None),
-    files: List[UploadFile] = File(...)
-):
+async def uploadPhotos(eventID: int = Form(...),userID: Optional[int] = Form(None),guestID: Optional[int] = Form(None),files: List[UploadFile] = File(...)):
     if userID is None and guestID is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -114,11 +101,7 @@ async def uploadPhotos(
         else:
             saved.append(
                 asdict(
-                    dc.uploadResults(
-                        file_name=orgName,
-                        status="skipped",
-                        reason="Unsupported file type"
-                    )
+                    dc.uploadResults(file_name=orgName,status="skipped",reason="Unsupported file type")
                 )
             )
             continue
@@ -215,8 +198,8 @@ async def uploadPhotos(
 @app.post("/video/generate")
 async def generateVideo(req: dc.MakeVideoRequest):
     try:
-        ss = SlideShow.SlideShowGenerator()
-        sb = StoryBoard.StoryBoardGen()
+        ss = SlideShow.SlideShowGenerator(db=db)
+        sb = StoryBoard.StoryBoardGen(db=db)
         
         media = db.getApprovedPhotosForStoryboard(req.eventID)
 
@@ -329,6 +312,100 @@ async def loginUser(login: dc.userLogin):
         )
 
     return user
+
+@app.post("/events/create")
+def create_event(event: dc.eventCreate, location: dc.eventLocation):
+
+    result = ev.createEvent(event=event, location= location)
     
+    if not result:
+        raise HTTPException(
+            status_code=500,
+            detail="Event could not be created."
+        )
+
+    return {
+        "message": "Event created successfully.",
+        "data": result
+    }
+    
+@app.get("/locations/all")
+def getAllLoc():
+
+    result = ev.getAllLocations()
+
+    if result is None:
+        raise HTTPException(
+            status_code=500,
+            detail="Locations could not be loaded."
+        )
+
+    return {
+        "message": "Locations loaded successfully.",
+        "locations": result
+    }
+
+@app.get("/locations/{locationID}")
+def getLocID(locationID: int):
+
+    result = ev.getLocationByID(locationID)
+
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Location not found."
+        )
+
+    return {
+        "message": "Location loaded successfully.",
+        "location": result}
+
+@app.get("/events/{eventID}")
+def getEvent(eventID: int):
+
+    result = ev.getEventByID(eventID)
+
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Event not found."
+        )
+
+    return {
+        "message": "Event loaded successfully.",
+        "event": result
+    }
+
+@app.patch("/events/{eventID}")
+def modifyEvent(eventID: int, event: dc.eventModify):
+
+    result = ev.modifyEvent(eventID=eventID, event=event)
+
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Event could not be modified."
+        )
+
+    return {
+        "message": "Event modified successfully.",
+        "event": result
+    }
+
+@app.patch("/locations/{locationID}")
+def modifyLoc(locationID: int, location: dc.eventLocationModify):
+
+    result = ev.modifyLocation(locationID=locationID, location=location)
+
+    if not result:
+        raise HTTPException(
+            status_code=404,
+            detail="Location could not be modified."
+        )
+
+    return {
+        "message": "Location modified successfully.",
+        "location": result
+    }
 if __name__ == "__main__":
     uvicorn.run("mainAPI:app", host="127.0.0.1", port=8000, reload=True)

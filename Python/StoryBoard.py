@@ -1,14 +1,22 @@
+import logging
 from datetime import datetime, timedelta
-import DBConn
-import ProjectHelper
 from pathlib import Path
 
+import DBConn
+import ProjectHelper
+
+log = logging.getLogger(__name__)
+
 class StoryBoardGen():
-    def __init__(self, eventTimeGap: int = 20):
+    def __init__(self, db=None, eventTimeGap: int = 20):
         self.eventTimeGap = eventTimeGap
-        self.db = DBConn.SQLbuilder()
-        self.db.connect()
         self.PH = ProjectHelper.Helpers()
+        if db is None:
+            log.warning("EventsClass.Manager created its own DB connection — db was not injected")
+            self.db = DBConn.SQLbuilder()
+            self.db.connect()
+        else:
+            self.db = db
 
     def parseTime(self, value):
         if value is None:

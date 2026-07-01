@@ -1,24 +1,32 @@
+import logging
+import os
+import tempfile
+from pathlib import Path
+
+import AzureClass
 import ContentScorer
+import DBConn
 import ImageRanker
 import PreFilter
-import VideoExtraction
-import tempfile
-import AzureClass
-from pathlib import Path
-import DBConn
-import logging
-import os 
 from ProjectHelper import Helpers as ph
 
+import VideoExtraction
+
+log = logging.getLogger(__name__)
+
 class newRunner:
-    def __init__(self):
+    def __init__(self, db=None):
         self.cs = ContentScorer.ContentScoring()
         self.ir = ImageRanker.blipRanker()
         self.pf = PreFilter.ImgQualFilt()
         self.ve = VideoExtraction.ExtractVidFrames()
         self.blob = AzureClass.blobHandler()
-        self.db = DBConn.SQLbuilder()
-        self.db.connect()
+        if db is None:
+            log.warning("EventsClass.Manager created its own DB connection — db was not injected")
+            self.db = DBConn.SQLbuilder()
+            self.db.connect()
+        else:
+            self.db = db
 
     def runProcess(self, eventID: int, dt: str = 'photo'):
         dType = dt2 = 'photo_id'

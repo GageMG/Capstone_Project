@@ -1,18 +1,27 @@
-import qrcode 
-import DBConn 
-from pathlib import Path
+import logging
 import secrets
-from datetime import datetime, timedelta
+from datetime import datetime
+from pathlib import Path
+
+import DBConn
+import qrcode
+
+log = logging.getLogger(__name__)
 
 class genQR():
-    def __init__(self, path = "http://localhost:8000"):
+    def __init__(self, db= None, path = "http://localhost:8000"):
         self.baseUrl = path
         self.fullUrl = None
         self.eventID = None
         self.token = None
-        self.db = DBConn.SQLbuilder()
         self.localTesting = Path(r"C:\CSI4999\qrCodes")
-        self.db.connect()
+        if db is None:
+            log.warning("EventsClass.Manager created its own DB connection — db was not injected")
+            self.db = DBConn.SQLbuilder()
+            self.db.connect()
+        else:
+            self.db = db
+
 
     def genToken(self):
        tokLen = 32

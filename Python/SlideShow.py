@@ -1,22 +1,29 @@
-from pathlib import Path
-import cv2 as cv
-import numpy as np
-from moviepy import VideoFileClip, AudioFileClip
-import DBConn
-import AzureClass
+import logging
 import tempfile
-import StoryBoard 
+from pathlib import Path
+
+import AzureClass
+import cv2 as cv
+import DBConn
+import numpy as np
+import StoryBoard
+from moviepy import AudioFileClip, VideoFileClip
+
+log = logging.getLogger(__name__)
 
 class SlideShowGenerator:
-    def __init__(self, outputDir: str = r'C:\CSI4999\Videos\Output', width: int = 1280, height: int = 720, fps: int = 30, secPerPhoto: int = 3):
+    def __init__(self, db=None, outputDir: str = r'C:\CSI4999\Videos\Output', width: int = 1280, height: int = 720, fps: int = 30, secPerPhoto: int = 3):
         self.outputDir = Path(outputDir)
         self.outputDir.mkdir(parents=True, exist_ok=True)
         self.width = width
         self.height = height
         self.fps = fps
         self.secPerPhoto = secPerPhoto
-        self.db = DBConn.SQLbuilder()
-        self.db.connect()
+        if db is None:
+            self.db = DBConn.SQLbuilder()
+            self.db.connect()
+        else:
+            self.db = db
 
     def resizePadding(self, img: str):
         h,w = img.shape[:2]

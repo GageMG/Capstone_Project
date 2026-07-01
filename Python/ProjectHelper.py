@@ -1,7 +1,9 @@
-from PIL import Image
-from PIL.ExifTags import TAGS , GPSTAGS
+from datetime import date, datetime
+
 import imagehash
-from datetime import datetime, date
+from PIL import Image
+from PIL.ExifTags import GPSTAGS, TAGS
+from pwdlib import PasswordHash
 
 
 class Helpers():
@@ -185,6 +187,14 @@ class Helpers():
         insFunc(results, dtype)
         return results
 
+    @staticmethod
+    def hashPwd(pwd: str) -> str:
+        return PasswordHash.recommended().hash(pwd)
+    
+    @staticmethod
+    def verifyPwd(userpwd: str, hashpwd: str) -> bool:
+        return PasswordHash.recommended().verify(password= userpwd, hash=hashpwd)
+    
 def main():
     proj = Helpers()
     md = proj. getMetaData(r"C:\CSI4999\Photos\IMG_0182.jpeg")
