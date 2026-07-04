@@ -90,7 +90,7 @@ export default function WelcomeScreen() {
 
   const handleCreateEvent = async (values: Record<string, string>) => {
     if (!hasToken()) {
-      Alert.alert("Login Required", "Log in or set your token in src/lib/api.ts first.");
+      Alert.alert("Login Required", "Log in or set EXPO_PUBLIC_JWT_TOKEN in .env first.");
       return;
     }
 

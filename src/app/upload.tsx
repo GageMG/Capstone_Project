@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { API_URL } from "@/lib/api";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
@@ -23,6 +24,8 @@ const THUMB = (SCREEN_WIDTH - 56) / 3;
 
 const MAX_PHOTOS = 20;
 const QR_TOKEN = "QR_TOKEN_HERE";
+const EVENT_ID = 0;
+const GUEST_ID = 0;
 
 type PickedPhoto = { id: string; uri: string };
 
@@ -45,8 +48,8 @@ export default function UploadScreen() {
   };
 
   const validateUpload = () => {
-    if (!QR_TOKEN || QR_TOKEN === "QR_TOKEN_HERE") {
-      Alert.alert("Security Error", "Missing valid QR event token.");
+    if (!QR_TOKEN || QR_TOKEN === "QR_TOKEN_HERE" || !EVENT_ID) {
+      Alert.alert("Security Error", "Missing valid QR event token or event ID.");
       return false;
     }
 
@@ -124,8 +127,9 @@ export default function UploadScreen() {
     try {
       const formData = new FormData();
 
-      formData.append("token", QR_TOKEN);
-      formData.append("approved", "false");
+      formData.append("eventID", String(EVENT_ID));
+      formData.append("qrToken", QR_TOKEN);
+      formData.append("guestID", String(GUEST_ID));
 
       photos.forEach((photo, index) => {
         formData.append("files", {
@@ -135,17 +139,14 @@ export default function UploadScreen() {
         } as any);
       });
 
-      const response = await fetch("https://zealous-stone-0f78c580f.7.azurestaticapps.net/upload", {
+      const response = await fetch(`${API_URL}/upload/guest`, {
         method: "POST",
-        headers: {
-          "Content-Type": "multipart/form-data",
-        },
         body: formData,
       });
 
       if (!response.ok) {
-        const err = await response.json();
-        throw new Error(err.detail ?? "Upload failed");
+        const err = await response.json().catch(() => ({}));
+        throw new Error(typeof err.detail === "string" ? err.detail : "Upload failed");
       }
 
       const result = await response.json();

@@ -15,12 +15,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { API_URL } from "@/lib/api";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
-const API_URL = "http://127.0.0.1:8000";
 
 type Photo = { id: string; uri: string };
 type Gallery = {
