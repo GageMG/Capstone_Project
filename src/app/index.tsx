@@ -11,12 +11,10 @@ import {
   View,
 } from "react-native";
 import FormModal, { FormField } from "@/components/FormModal";
+import { apiFetch, hasToken, setToken } from "@/lib/api";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
-const API_URL = "http://127.0.0.1:8000";
-
-// Maps to the backend's userCreate model (role defaults to "user", phone sent blank).
 const ACCOUNT_FIELDS: FormField[] = [
   { key: "user_name", label: "Username", placeholder: "Choose a username", autoCapitalize: "none" },
   { key: "first_name", label: "First Name", placeholder: "Your first name" },
@@ -26,11 +24,24 @@ const ACCOUNT_FIELDS: FormField[] = [
 ];
 
 const EVENT_FIELDS: FormField[] = [
-  { key: "event_name", label: "Event Name", placeholder: "e.g. Sarah's Wedding" },
-  { key: "date", label: "Date", placeholder: "MM/DD/YYYY" },
-  { key: "location", label: "Location", placeholder: "Where is it?" },
-  { key: "description", label: "Description", placeholder: "Tell guests about the event", multiline: true },
+  { key: "name", label: "Event Name", placeholder: "e.g. Sarah's Wedding" },
+  { key: "type", label: "Type", placeholder: "Wedding, Birthday, Graduation…" },
+  { key: "event_date", label: "Date", placeholder: "MM/DD/YYYY" },
+  { key: "password", label: "Event Password", placeholder: "Password guests will use", secure: true },
+  { key: "venue_name", label: "Venue", placeholder: "Venue name" },
+  { key: "street", label: "Street", placeholder: "123 Main St" },
+  { key: "city", label: "City", placeholder: "City" },
+  { key: "state", label: "State", placeholder: "MI" },
+  { key: "zip", label: "ZIP", placeholder: "48309", keyboardType: "number-pad" },
 ];
+
+const parseDate = (s: string) => {
+  const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s.trim());
+  if (!m) return null;
+  const [mo, d, y] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const date = new Date(y, mo - 1, d);
+  return date.getMonth() === mo - 1 && date.getDate() === d ? date.toISOString() : null;
+};
 
 export default function WelcomeScreen() {
   const { colors: c } = useTheme();
@@ -40,8 +51,23 @@ export default function WelcomeScreen() {
   const [modal, setModal] = useState<null | "account" | "event">(null);
   const [submitting, setSubmitting] = useState(false);
 
-  const handleLogin = () => {
-    console.log("Login pressed", { username, password });
+  const handleLogin = async () => {
+    const login = username.trim();
+    if (!login || !password) {
+      Alert.alert("Missing Info", "Enter your username and password.");
+      return;
+    }
+
+    try {
+      const { access_token } = await apiFetch("/users/login", {
+        ...(login.includes("@") ? { email: login } : { user_name: login }),
+        pwd: password,
+      });
+      setToken(access_token);
+      Alert.alert("Logged In", "You are now signed in.");
+    } catch (error: any) {
+      Alert.alert("Login Failed", error.message ?? "Please try again.");
+    }
   };
 
   const handleCreateAccount = async (values: Record<string, string>) => {
@@ -52,19 +78,7 @@ export default function WelcomeScreen() {
 
     setSubmitting(true);
     try {
-      const response = await fetch(`${API_URL}/users/create`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...values, phone: "", role: "user" }),
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail ?? "Could not create account.");
-      }
-
-      const user = await response.json();
-      console.log("Account created:", user);
+      const user = await apiFetch("/users/create", { ...values, phone: "", role: "user" });
       setModal(null);
       Alert.alert("Account Created", `Welcome, ${user.first_name}!`);
     } catch (error: any) {
@@ -74,11 +88,43 @@ export default function WelcomeScreen() {
     }
   };
 
-  // No backend event-creation endpoint yet — stubbed for now.
-  const handleCreateEvent = (values: Record<string, string>) => {
-    console.log("Create event:", values);
-    setModal(null);
-    Alert.alert("Event Created", `"${values.event_name}" has been created.`);
+  const handleCreateEvent = async (values: Record<string, string>) => {
+    if (!hasToken()) {
+      Alert.alert("Login Required", "Log in or set your token in src/lib/api.ts first.");
+      return;
+    }
+
+    const eventDate = parseDate(values.event_date);
+    if (!eventDate) {
+      Alert.alert("Invalid Date", "Enter the date as MM/DD/YYYY.");
+      return;
+    }
+
+    setSubmitting(true);
+    try {
+      await apiFetch("/events/create", {
+        event: {
+          user_id: 0,
+          name: values.name,
+          type: values.type,
+          event_date: eventDate,
+          password: values.password,
+        },
+        location: {
+          venue_name: values.venue_name,
+          street: values.street,
+          city: values.city,
+          state: values.state,
+          zip: values.zip,
+        },
+      });
+      setModal(null);
+      Alert.alert("Event Created", `"${values.name}" is ready.`);
+    } catch (error: any) {
+      Alert.alert("Event Creation Failed", error.message ?? "Please try again.");
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -194,6 +240,7 @@ export default function WelcomeScreen() {
         subtitle="Set up a new event gallery"
         fields={EVENT_FIELDS}
         submitLabel="CREATE EVENT"
+        submitting={submitting}
         onClose={() => setModal(null)}
         onSubmit={handleCreateEvent}
       />
