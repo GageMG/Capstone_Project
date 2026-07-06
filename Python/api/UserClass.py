@@ -1,13 +1,20 @@
+
 import shared.DataStruct as ds
 from shared.ProjectHelper import Helpers as ph
 
 
 class Users:
     def __init__(self, db, log):
-            self.db = db
-            self.log = log
+        self.db = db
+        self.log = log
   
     def createUser(self, user: ds.userCreate):
+        isStrong, message = ph.validateStrongPassword(user.pwd)
+
+        if not isStrong:
+            print(f"Weak password rejected: {message}")
+            return None
+
         userData = user.model_dump(exclude={"pwd"})
         userData["password_hash"] = ph.hashPwd(user.pwd)
         
@@ -24,12 +31,11 @@ class Users:
     def updateUser(self, userID: int):
         print('place')
     
-    def getUserData(self, userID:int):
+    def getUserData(self, userID: int):
         return self.db.getUserInfo(userID)
     
     def loginUser(self, login: ds.userLogin) -> int:
         user = self.db.getUserPWD(login.email, login.user_name)
-
 
         if not user:
             print('Record not found') 
@@ -43,7 +49,6 @@ class Users:
             print('Invalid password')
             return None
 
-        #userData = self.db.getUserInfo(user["user_id"])
         print('Valid password')
         return user["user_id"]
 
@@ -59,8 +64,7 @@ if __name__ == "__main__":
         pwd="TestPassword123!"
     )
 
-    #test = ds.userLogin(email= "testuser5@example.com", pwd="TestPassword123!")
     userService = Users()
     res = userService.createUser(testUser)
-    #result = userService.loginUser(test)
     print(res)
+

@@ -1,3 +1,4 @@
+
 from datetime import date, datetime
 
 import imagehash
@@ -9,9 +10,9 @@ from pwdlib import PasswordHash
 class Helpers():
     def __init__(self):
         self.name = "placeholder"
+
     @staticmethod
     def convertGPS(value):
-
         d = float(value[0])
         m = float(value[1])
         s = float(value[2])
@@ -54,7 +55,6 @@ class Helpers():
 
     @staticmethod
     def getMetaData(image_path: str):
-  
         metadata = {
             "photo_original_date": None,
             "camera_model": None,
@@ -91,13 +91,13 @@ class Helpers():
         except Exception as e:
             print(f"Metadata error: {e}")
             return metadata
+
     @staticmethod
-    def getIDNum(s:str, pos:int, symbol : str = '_'):
+    def getIDNum(s: str, pos: int, symbol: str = '_'):
         return int(s.split(symbol)[pos])
-    
-    @staticmethod    
+
+    @staticmethod
     def formatTimeStamps(value):
-      
         if value is None or value == "":
             return None
 
@@ -110,7 +110,7 @@ class Helpers():
         value = str(value).strip()
 
         possible_formats = [
-            "%Y:%m:%d %H:%M:%S",   # EXIF format
+            "%Y:%m:%d %H:%M:%S",
             "%Y-%m-%d %H:%M:%S",
             "%Y-%m-%dT%H:%M:%S",
             "%Y-%m-%d"
@@ -129,17 +129,18 @@ class Helpers():
     def hashToStr(self, h):
         if h is None:
             return None
-        # already a string
+
         if isinstance(h, str):
             return h
-        # imagehash object (correct case)
+
         if isinstance(h, imagehash.ImageHash):
             return str(h)
-        # numpy array (shouldn't happen, but just in case)
+
         if hasattr(h, 'flatten'):
             return ''.join(h.flatten().astype(int).astype(str))
+
         return str(h)
-    
+
     @staticmethod
     def strToHash(s):
         if s is None:
@@ -163,10 +164,10 @@ class Helpers():
         return None
 
     @staticmethod
-    def findDuplicateImage( hash1, hash2, threshold: int = 6):
-        if hash1 is None or hash2 is  None:
+    def findDuplicateImage(hash1, hash2, threshold: int = 6):
+        if hash1 is None or hash2 is None:
             return None
-        
+
         hash1 = Helpers.strToHash(hash1)
         hash2 = Helpers.strToHash(hash2)
         dist = hash1 - hash2
@@ -175,56 +176,68 @@ class Helpers():
             return True
         else:
             return False
-        
+
     @staticmethod
     def batchRun(mediaList: list[dict], procFunc, insFunc, dtype: str = 'photo_id'):
         results = []
 
-
         try:
             for media in mediaList:
-                
                 tempId = media.get(dtype)
 
                 if tempId is None:
                     raise ValueError(f"Missing {dtype} in media row: {media}")
-                
+
                 filePath = media.get("file_path")
                 if not filePath:
                     raise ValueError(f"Missing file_path for {dtype}={tempId}")
-                
 
                 res = procFunc(tempId, filePath)
 
                 if not res:
                     raise ValueError(f"Processing returned no result for {dtype}={tempId}")
 
-
                 if dtype == 'frame_id':
                     res["frame_id"] = res.pop("photo_id")
 
                 results.append(res)
 
-
             insFunc(results, dtype)
             return results
-    
+
         except Exception as e:
             errMsg = f'Error: {e}'
             print(errMsg)
 
+    @staticmethod
+    def validateStrongPassword(pwd: str) -> tuple[bool, str]:
+        if len(pwd) < 8:
+            return False, "Password must be at least 8 characters."
+        if not any(c.isupper() for c in pwd):
+            return False, "Password must include an uppercase letter."
+        if not any(c.islower() for c in pwd):
+            return False, "Password must include a lowercase letter."
+        if not any(c.isdigit() for c in pwd):
+            return False, "Password must include a number."
+        if not any(c in "!@#$%^&*(),.?\":{}|<>" for c in pwd):
+            return False, "Password must include a special character."
+        return True, ""
 
     @staticmethod
     def hashPwd(pwd: str) -> str:
         return PasswordHash.recommended().hash(pwd)
-    
+
     @staticmethod
     def verifyPwd(userpwd: str, hashpwd: str) -> bool:
-        return PasswordHash.recommended().verify(password= userpwd, hash=hashpwd)
-    
+        return PasswordHash.recommended().verify(password=userpwd, hash=hashpwd)
+
+
 def main():
     proj = Helpers()
-    md = proj. getMetaData(r"C:\CSI4999\Photos\IMG_0182.jpeg")
+    md = proj.getMetaData(r"C:\CSI4999\Photos\IMG_0182.jpeg")
     print(md)
+
+
 if __name__ == "__main__":
     main()
+
