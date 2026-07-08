@@ -66,7 +66,7 @@ db.connect()
 
 uc = UserClass.Users(db=db, log=logger)
 ev = EventsClass.Manager(db=db, log=logger)
-qrCode = qrGen.genQR(db=db, log=logger)
+qrCode = qrGen.genQR(db=db, log=logger, blob=blob)
 
 if IS_PRODUCTION:
     app = fastapi.FastAPI(title='CSI4999', docs_url=None, redoc_url=None, openapi_url=None)
@@ -102,20 +102,21 @@ def checkRateLimit(key: str, maxCall: int, windowSec: int) -> None:
 def enqueueJob(msg: dict):
     jobID = None
     try:
+
+        logger.info(f"enqueueJob received msg: {msg}")
+
         event_id = msg.get("event_id")
         req_id = msg.get("request_id")
         job_type = msg.get("job_type")
+        upload_id = msg.get("upload_id")
 
         if event_id is None:
             raise HTTPException(status_code=400, detail="Missing event_id")
 
-        if req_id is None:
-            raise HTTPException(status_code=400, detail="Missing request_id")
-
         if not job_type:
             raise HTTPException(status_code=400, detail="Missing job_type")
         
-        job = db.createJobQueue(req_id, job_type , status="pending")
+        job = db.createJobQueue(req_id, job_type, status="pending", uploadID=upload_id)
 
         if not job:
                 raise HTTPException(status_code=500,detail="Storyboard was created, but job_queue row could not be created.")
@@ -128,9 +129,14 @@ def enqueueJob(msg: dict):
             "job_id": jobID,
             "job_type": job_type,
             "event_id": event_id,
-            'request_id': req_id,
-            'storyboard_id': msg.get('storyboard') | None
+            "request_id": req_id,
+            "storyboard_id": msg.get("storyboard_id"),
+            "type": msg.get("type"),
+            "upload_id": upload_id,
+            "upload_ids": msg.get("upload_ids", [])
         }
+
+        logger.info(f"Sending queue message job: {jobID}")
 
         jobMsg = blob.sendQMsg(queueMessage)
 
@@ -141,9 +147,12 @@ def enqueueJob(msg: dict):
         
         db.updateJobQueueStatus(jobID=jobID,status="queued")
 
+        logger.info(f"Job queued successfully. job_id={jobID}")
+
         return {
             "job_id": jobID,
             "job_type": job_type,
+            "event_id": event_id,
             "request_id": req_id,
             "status": "queued"
         }
@@ -151,6 +160,7 @@ def enqueueJob(msg: dict):
         logger.error({e})
         if jobID is not None:
             db.updateJobQueueStatus(jobID=jobID,status="failed",errorMessage=str(e))
+
 
 @app.middleware("http")
 async def add_security_headers(request, call_next):
@@ -218,18 +228,105 @@ def userOwnsLocation(location: dict, current_user_id: int) -> bool:
     owner_id = event.get("user_id") or event.get("owner_id")
     return owner_id == current_user_id
 
-@app.post('/qr/generate')
-async def createQR(req: dc.QRRequest, current_user_id: int = Depends(getCurrentUserID)):
+logger = setup_logger()
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
+authMang = Auth.Auth()
+
+blob = blobHandler(logger)
+db = SQLbuilder(logger)
+db.connect()
+
+uc = UserClass.Users(db=db, log=logger)
+ev = EventsClass.Manager(db=db, log=logger)
+qrCode = qrGen.genQR(db=db, log=logger, blob=blob)
+
+if IS_PRODUCTION:
+    app = fastapi.FastAPI(title='CSI4999', docs_url=None, redoc_url=None, openapi_url=None)
+else:
+    app = fastapi.FastAPI(title='CSI4999')
+uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
+
+ALLOWED_ORIGINS = ['csi4999-api-h4exhuc3b3btafg3.eastus-01.azurewebsites.net','https://zealous-stone-0f78c580f.7.azurestaticapps.net/', "http://localhost:3000","http://localhost:5173",]
+
+app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=True,allow_methods=["*"],allow_headers=["*"],)
+
+RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
+
+
+def getClientIp(req: Request) -> str:
+    if req.client and req.client.host:
+        return req.client.host
+    return None
+
+def checkRateLimit(key: str, maxCall: int, windowSec: int) -> None:
+    now = time.monotonic()
+    cutoff = now - windowSec
+
+    calls = RATE_LIMIT_BUCKETS.get(key, [])
+    calls = [timestamp for timestamp in calls if timestamp > cutoff]
+
+    if len(calls)>= maxCall:
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail = 'Too many request. Try again later')
+    
+    calls.append(now)
+    RATE_LIMIT_BUCKETS[key]= calls
+
+
+def enqueuePreprocessJobs(eventID: int, res: dict):
+    uploads_by_type = {}
+
+    for upload in res.get("uploads", []):
+        file_type = upload.get("file_type")
+        upload_id = upload.get("upload_id")
+
+        if file_type not in ("photo", "video") or upload_id is None:
+            continue
+
+        uploads_by_type.setdefault(file_type, []).append(upload_id)
+
+    if not uploads_by_type:
+        saved_results = [
+            item for item in res.get("results", [])
+            if item.get("status") == "saved" and item.get("file_type") in ("photo", "video")
+        ]
+
+        for item, upload_id in zip(saved_results, res.get("upload_ids", [])):
+            uploads_by_type.setdefault(item["file_type"], []).append(upload_id)
+
+    jobs = []
+
+    for file_type, upload_ids in uploads_by_type.items():
+        jobs.append(enqueueJob({
+            "event_id": eventID,
+            "request_id": None,
+            "job_type": "preprocess",
+            "type": file_type,
+            "upload_id": upload_ids[0],
+            "upload_ids": upload_ids,
+        }))
+
+    return jobs
+
+@app.post("/qr/generate")
+async def createQR(req: dc.QRRequest,current_user_id: int = Depends(getCurrentUserID)):
     verifyEventOwner(req.event_id, current_user_id)
-    qrCode.generateUrl(req.event_id)
-    result = qrCode.generateQRcode(req.event_id, req.expires_at, req.max_uploads, req.purpose, req.is_active)
+
+    result = qrCode.generateQRcode(
+        eventID=req.event_id,
+        expirationDate=req.expires_at,
+        maxUpload=req.max_uploads,
+        purpose=req.purpose,
+        setActive=req.is_active
+    )
 
     return {
-            "event_id": req.event_id,
-            "status": "created",
-            "url": 'temp',
-            "result": result
-        }
+        "event_id": req.event_id,
+        "status": "created",
+        "qr_image_url": result["qr_image_url"],
+        "scan_url": result["qr_url"],
+        "result": result
+    }
 
 @app.post('/qr/validate')
 async def validateQR(req: dc.validateToken, request: Request ):
@@ -248,9 +345,14 @@ async def uploadUserPhotos(eventID: int = Form(...),files: List[UploadFile] = Fi
     checkRateLimit(f"upload_user:{current_user_id}", 20, 3600)
     verifyEventOwner(eventID, current_user_id)
 
-    return await uploadManager.upload_files(eventID=eventID,userID=current_user_id,guestID=None,files=files)
+    res = await uploadManager.upload_files(eventID=eventID,userID=current_user_id,guestID=None,files=files)
 
+    if res.get("uploaded", 0) > 0:
+        jobs = enqueuePreprocessJobs(eventID, res)
+        res["jobs"] = jobs
+        res["job"] = jobs[0] if jobs else None
 
+    return res
 
 @app.post("/upload/guest")
 async def uploadGuestPhotos(request: Request, eventID: int = Form(...),qrToken: str = Form(...),guestID: int = Form(...),files: List[UploadFile] = File(...)):
@@ -260,8 +362,10 @@ async def uploadGuestPhotos(request: Request, eventID: int = Form(...),qrToken: 
 
     res = await uploadManager.upload_files(eventID=eventID,userID=None,guestID=guestID,files=files)
 
-    if res["uploaded"] > 0:
-        db.incrementQRUploadCount(qrToken, res["uploaded"])
+    if res.get("uploaded", 0) > 0:
+        jobs = enqueuePreprocessJobs(eventID, res)
+        res["jobs"] = jobs
+        res["job"] = jobs[0] if jobs else None
 
     return res
 

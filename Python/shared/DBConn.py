@@ -26,7 +26,7 @@ class SQLbuilder:
             self.client.table("photos").select("photo_id").limit(1).execute()
             return True
         except Exception as error:
-            print("Connection failed:", error)
+            self.log.info("Connection failed:", error)
             return False
 
     def insertToDB(self, values, table: str = "Basic",  kwMatch: str ="photo_id"):
@@ -38,30 +38,46 @@ class SQLbuilder:
                 result = query.insert(values).execute()
 
             count = len(values) if isinstance(values, list) else 1
-            print(f"Saved {count} row(s) to {table}")
+            self.log.info(f"Saved {count} row(s) to {table}")
             return result.data
 
         except Exception as e:
-            print(f"Error inserting into {table}: {e}")
+            self.log.info(f"Error inserting into {table}: {e}")
             return None
 
-    def postQRtoDB(self, eventID: int, url: str, token: str, expires_at: str, max_upload: int, purpose: str, is_active: bool):
+    def postQRtoDB(self, eventID: int, url: str, token: str, expires_at: str, max_uploads: int, purpose: str, is_active: bool):
         if eventID is None or url is None:
-            print('Missing Values in arguments')
+            self.log.info('Missing Values in arguments')
             return None
 
-        table = 'qrcodes'
-        values = {
-            "event_id": eventID,
-            "image_url": url,
-            "token": token,
-            "expires_at": expires_at,
-            "max_uploads": max_upload,
-            "purpose": purpose,
-            "is_active": is_active
-        }
+        try:
+            data = {
+                "event_id": eventID,
+                "image_url": url,
+                "token": token,
+                "expires_at": expires_at,
+                "max_uploads": max_uploads,
+                "purpose": purpose,
+                "is_active": is_active
+            }
 
-        return self.insertToDB(values, table)
+            result = (
+                self.client
+                .table("qrcodes")
+                .insert(data)
+                .select("*")
+                .execute()
+            )
+
+            if not result.data:
+                self.log.warning("QR code insert returned no data")
+                return None
+
+            return result.data[0]
+
+        except Exception as e:
+            self.log.exception(f"Error posting QR code to DB: {e}")
+            return None
 
     def incrementQRUploadCount(self, token: str, amount: int = 1):
         if token is None or token.strip() == "":
@@ -86,45 +102,34 @@ class SQLbuilder:
             return bool(result.data)
 
         except Exception as e:
-            print(f"Error incrementing QR upload count: {e}")
+            self.log.info(f"Error incrementing QR upload count: {e}")
             return False
 
 
-    def getQRToken(self, token: str, eventID: int = None):
-        if token is None or token.strip() == "":
-            return None
-
+    def getQRToken(self, token: str):
         try:
-            query = (
+            result = (
                 self.client
                 .table("qrcodes")
-                .select(
-                    "qr_code_id, event_id, image_url, token, is_active, "
-                    "expires_at, max_uploads, upload_count, created, purpose"
-                )
-                .eq("token", token.strip())
+                .select("*")
+                .eq("token", token)
+                .limit(1)
+                .execute()
             )
 
-            if eventID is not None:
-                query = query.eq("event_id", eventID)
-
-            result = query.execute()
-
-            rows = result.data
-
-            if not rows:
+            if not result.data:
                 return None
 
-            return rows[0]
+            return result.data[0]
 
         except Exception as e:
-            print(f"Error getting QR token: {e}")
+            self.log.exception(f"Error getting QR token: {e}")
             return None
 
     def insertPreFilter(self, results: list[dict], dtype: str = 'photo_id'):
         
         if not results:
-            print("No filter results to insert.")
+            self.log.info("No filter results to insert.")
             return None
         table = 'photo_filter'
 
@@ -153,7 +158,7 @@ class SQLbuilder:
 
     def insertContent(self, results: list[dict], dtype = 'photo_id'):
         if not results:
-            print("No filter results to insert.")
+            self.log.info("No filter results to insert.")
             return None
         
         table = 'photo_content'
@@ -176,7 +181,7 @@ class SQLbuilder:
 
     def insertImageRanking(self, dataDict: list[dict], dtype: str ='photo_id'):
         if dataDict is None:
-            print("Missing image ranking data")
+            self.log.info("Missing image ranking data")
             return None
 
         table ='photo_ranking'
@@ -203,12 +208,12 @@ class SQLbuilder:
             result = self.client.table(table).select("*").execute()
             return result.data
         except Exception as e:
-            print(f"Error selecting all from {table}: {e}")
+            self.log.info(f"Error selecting all from {table}: {e}")
             return None
 
     def getApprovedPhotosForStoryboard(self, eventID: int):
         if eventID is None:
-            print("Missing eventID")
+            self.log.info("Missing eventID")
             return []
 
         try:
@@ -220,12 +225,12 @@ class SQLbuilder:
             return result.data or []
 
         except Exception as e:
-            print(f"Error getting approved photos for storyboard: {e}")
+            self.log.info(f"Error getting approved photos for storyboard: {e}")
             return []
         
     def createStoryboard(self,eventID: int,requestID: int | None = None,status: str = "created"):
         if eventID is None:
-            print("Missing eventID")
+            self.log.info("Missing eventID")
             return None
 
         values = {
@@ -259,7 +264,7 @@ class SQLbuilder:
             rows = result.data or []
 
             if not rows:
-                print("Storyboard was not created.")
+                self.log.info("Storyboard was not created.")
                 return None
 
             storyboard = rows[0]
@@ -273,17 +278,17 @@ class SQLbuilder:
             return storyboard
 
         except Exception as e:
-            print(f"Error creating storyboard: {e}")
+            self.log.info(f"Error creating storyboard: {e}")
             return None
         
     
     def insertStoryboardItems(self, storyboardID: int, storyboard_items: list[dict]):
         if storyboardID is None:
-            print("Missing storyboardID")
+            self.log.info("Missing storyboardID")
             return []
 
         if not storyboard_items:
-            print("No storyboard items to upsert.")
+            self.log.info("No storyboard items to upsert.")
             return []
 
         values = []
@@ -326,11 +331,11 @@ class SQLbuilder:
 
             rows = result.data or []
 
-            print(f"Upserted {len(rows)} storyboard item(s).")
+            self.log.info(f"Upserted {len(rows)} storyboard item(s).")
             return rows
 
         except Exception as e:
-            print(f"Error upserting storyboard items: {e}")
+            self.log.info(f"Error upserting storyboard items: {e}")
             return []
 
     def createStoryboardWithItems(self,eventID: int,storyboard_items: list[dict],requestID: int | None = None):
@@ -355,50 +360,50 @@ class SQLbuilder:
             "items": inserted_items
         }
     
-    def getStoryboardByEvent(self, eventID: int):
-        if eventID is None:
-            print("Missing eventID")
-            return []
+    #def getStoryboardByEvent(self, eventID: int):
+    #     if eventID is None:
+    #         self.log.info("Missing eventID")
+    #         return []
 
-        try:
+    #     try:
 
-            result = (
-                self.client.table("storyboard_items")
-                .select(
-                    "storyboard_id, event_id, photo_id, sequence_order, "
-                    "scene_label, confidence, reason, "
-                    "photos(upload_id, uploads(file_path, blob_name))" 
-                )
-                .eq("event_id", eventID)
-                .order("sequence_order", desc=False)
-                .execute()
-            )
+    #         result = (
+    #             self.client.table("storyboard_items")
+    #             .select(
+    #                 "storyboard_id, photo_id, sequence_order, "
+    #                 "scene_label, confidence, reason, "
+    #                 "photos(upload_id, uploads(file_path, blob_name))" 
+    #             )
+    #             .eq("event_id", eventID)
+    #             .order("sequence_order", desc=False)
+    #             .execute()
+    #         )
 
-            rows = result.data or []
+    #         rows = result.data or []
 
-            cleaned = []
-            for row in rows:
-                photo = row.pop("photos", None) or {}
-                upload = photo.get("uploads") or {}
-                row["file_path"] = upload.get("file_path")
-                row["blob_name"] = upload.get("blob_name")
-                row["scene_label"] = row.get("scene_label") or "General Event Moment"
-                row["confidence"] = row.get("confidence") or 0
-                row["reason"] = row.get("reason") or ""
-                cleaned.append(row)
+    #         cleaned = []
+    #         for row in rows:
+    #             photo = row.pop("photos", None) or {}
+    #             upload = photo.get("uploads") or {}
+    #             row["file_path"] = upload.get("file_path")
+    #             row["blob_name"] = upload.get("blob_name")
+    #             row["scene_label"] = row.get("scene_label") or "General Event Moment"
+    #             row["confidence"] = row.get("confidence") or 0
+    #             row["reason"] = row.get("reason") or ""
+    #             cleaned.append(row)
 
-            return cleaned
+    #         return cleaned
 
-        except Exception as e:
-            print(f"Error fetching storyboard for event {eventID}: {e}")
-            return []
+    #     except Exception as e:
+    #         self.log.info(f"Error fetching storyboard for event {eventID}: {e}")
+    #         return []
 
-        except Exception as e:
-            print(f"Error getting storyboard: {e}")
-            return []
+    #     except Exception as e:
+    #         self.log.info(f"Error getting storyboard: {e}")
+    #         return []
 
     def insertMusic(self, title: str, fileName: str, filePath: str, artist: str = None, eventType: str = "general",moodLabel: str = "general", 
-                    durationSeconds: float = 0, source: str = "local file",licenseType: str = "project testing", isActive: bool = True):
+                durationSeconds: float = 0, source: str = "local file",licenseType: str = "project testing", isActive: bool = True):
         table = 'music'
 
         values = {
@@ -413,7 +418,7 @@ class SQLbuilder:
             "license_type": licenseType,
             "is_active": isActive
         }
-        return self.insertToDB(values, table)
+        return self.insertToDB(values, table, kwMatch=None)
 
     def insertGeneratedVideo(self,eventID: int,fileName: str,filePath: str,musicID: int | None = None,title: str = "Final Event Video",
         videoType: str = "slideshow",status: str = "completed",durationSeconds: float = 0,width: int = 1280,height: int = 720,fps: int = 30,fileSize: int = 0):
@@ -433,7 +438,7 @@ class SQLbuilder:
                 "file_size": fileSize
             }
 
-            print("Generated video insert values:", values)
+            self.log.info("Generated video insert values:", values)
 
             result = (
                 self.client
@@ -442,16 +447,16 @@ class SQLbuilder:
                 .execute()
             )
 
-            print("Generated video inserted.")
+            self.log.info("Generated video inserted.")
             return result.data
 
         except Exception as e:
-            print(f"Error inserting into generated_videos: {e}")
+            self.log.exception(f"Error inserting into generated_videos: {e}")
             return None
             
     def insertUploads(self, uploads: list[dict]):
         if not uploads:
-            print("No uploads to insert.")
+            self.log.info("No uploads to insert.")
             return []
 
         try:
@@ -484,16 +489,16 @@ class SQLbuilder:
                 .execute()
             )
 
-            print(f"Inserted {len(result.data)} upload records.")
+            self.log.info(f"Inserted {len(result.data)} upload records.")
             return result.data
 
         except Exception as e:
-            print(f"Error inserting uploads: {e}")
+            self.log.exception(f"Error inserting uploads: {e}")
             return None
     
     def insertMediaRecordsFromUploads(self, insertedUploads: list[dict]):
         if not insertedUploads:
-            print("No inserted uploads to process.")
+            self.log.info("No inserted uploads to process.")
             return {
                 "photos": [],
                 "videos": []
@@ -534,7 +539,7 @@ class SQLbuilder:
                 )
 
                 inserted_photos = photo_result.data
-                print(f"Inserted {len(inserted_photos)} photo row(s).")
+                self.log.info(f"Inserted {len(inserted_photos)} photo row(s).")
 
             if videoRows:
                 video_result = (
@@ -545,7 +550,7 @@ class SQLbuilder:
                 )
 
                 inserted_videos = video_result.data
-                print(f"Inserted {len(inserted_videos)} video row(s).")
+                self.log.info(f"Inserted {len(inserted_videos)} video row(s).")
 
             self.updateUploadsWithMediaIds(inserted_photos, inserted_videos)
 
@@ -555,7 +560,7 @@ class SQLbuilder:
             }
 
         except Exception as e:
-            print(f"Error inserting media records: {e}")
+            self.log.exception(f"Error inserting media records: {e}")
             return {
                 "photos": inserted_photos,
                 "videos": inserted_videos
@@ -573,14 +578,15 @@ class SQLbuilder:
                     "video_id": video["video_id"]
                 }).eq("upload_id", video["upload_id"]).execute()
 
-            print("Updated uploads with photo_id/video_id.")
+            self.log.info("Updated uploads with photo_id/video_id.")
 
         except Exception as e:
-            print(f"Error updating uploads with media ids: {e}")
+            self.log.exception(f"Error updating uploads with media ids: {e}")
 
-    def getMedia(self, eventID: int, mediaType: str):
+    def getMedia(self, eventID: int, mediaType: str, uploadIDs: Optional[list[int]] = None):
+
         if eventID is None:
-            print("Missing eventID")
+            self.log.error("Missing eventID")
             return []
 
         mediaType = mediaType.lower().strip()
@@ -594,7 +600,7 @@ class SQLbuilder:
         )
 
         try:
-            result = (
+            query = (
                 self.client
                 .table(table)
                 .select(f"""
@@ -609,9 +615,13 @@ class SQLbuilder:
                 """)
                 .eq("event_id", eventID)
                 .in_("status", ["pending", "failed"])
-                .execute()
             )
 
+            if uploadIDs:
+                query = query.in_("upload_id", uploadIDs)
+
+            result = query.execute()
+                
             rows = result.data or []
             media_list = []
 
@@ -627,7 +637,7 @@ class SQLbuilder:
                     "file_path": upload.get("file_path"),
                 })
 
-            print(
+            self.log.info(
                 f"{mediaType.capitalize()} data obtained: "
                 f"{len(media_list)} pending/failed item(s)"
             )
@@ -635,13 +645,13 @@ class SQLbuilder:
             return media_list
 
         except Exception as e:
-            print(f"Error occurred getting {mediaType}: {e}")
+            self.log.exception(f"Error occurred getting {mediaType}: {e}")
             return []
         
     def insertPromptRequest(self, promptData: dict):
 
         if not promptData:
-            print("No prompt request data to insert.")
+            self.log.info("No prompt request data to insert.")
             return None
 
         try:
@@ -687,7 +697,7 @@ class SQLbuilder:
             missing = [field for field in required if row.get(field) is None]
 
             if missing:
-                print(f"Missing required prompt request fields: {missing}")
+                self.log.info(f"Missing required prompt request fields: {missing}")
                 return None
 
             result = (
@@ -697,11 +707,11 @@ class SQLbuilder:
                 .execute()
             )
 
-            print("Prompt request inserted.")
+            self.log.info("Prompt request inserted.")
             return result.data
 
         except Exception as e:
-            print(f"Error inserting prompt request: {e}")
+            self.log.exception(f"Error inserting prompt request: {e}")
             return None 
         
     def _apply_upload_owner_filter(self,query,userID: Optional[int] = None,guestID: Optional[int] = None):
@@ -823,13 +833,13 @@ class SQLbuilder:
             return None
 
         except Exception as e:
-            print(f"Error creating user: {e}")
+            self.log.exception(f"Error creating user: {e}")
             return None
     
     def getUserPWD(self, email: str = None, userName: str = None):
         try:
             if not email and not userName:
-                print("Email or username is required.")
+                self.log.info("Email or username is required.")
                 return None
 
             query = (
@@ -848,7 +858,7 @@ class SQLbuilder:
             return result.data[0] if result.data else None
 
         except Exception as e:
-            print(f"Error getting user password: {e}")
+            self.log.exception(f"Error getting user password: {e}")
             return None
 
     def getUserInfo(self, userID):
@@ -878,7 +888,7 @@ class SQLbuilder:
             return None
 
         except Exception as e:
-            print(f"Error creating event: {e}")
+            self.log.exception(f"Error creating event: {e}")
             return None
             
     def locationCreate(self, location: dict):
@@ -895,7 +905,7 @@ class SQLbuilder:
             return None
 
         except Exception as e:
-            print(f"Error creating event location: {e}")
+            self.log.exception(f"Error creating event location: {e}")
             return None
         
     def locationGetAll(self):
@@ -913,7 +923,7 @@ class SQLbuilder:
             return result.data
 
         except Exception as e:
-            print(f"Error getting locations: {e}")
+            self.log.exception(f"Error getting locations: {e}")
             return None
         
     def locationGetByID(self, locationID: int):
@@ -930,7 +940,7 @@ class SQLbuilder:
             return result.data
 
         except Exception as e:
-            print(f"Error getting location: {e}")
+            self.log.info(f"Error getting location: {e}")
             return None
         
     def eventGetAllByUser(self, userID: int):
@@ -961,7 +971,7 @@ class SQLbuilder:
             return result.data
 
         except Exception as e:
-            print(f"Error getting user events: {e}")
+            self.log.exception(f"Error getting user events: {e}")
             return None
         
     def eventGetByID(self, eventID: int):
@@ -1001,7 +1011,7 @@ class SQLbuilder:
             return result.data
 
         except Exception as e:
-            print(f"Error getting event: {e}")
+            self.log.exception(f"Error getting event: {e}")
             return None
         
     def eventModify(self, eventID: int, eventData: dict):
@@ -1020,7 +1030,7 @@ class SQLbuilder:
             return None
 
         except Exception as e:
-            print(f"Error modifying event: {e}")
+            self.log.exception(f"Error modifying event: {e}")
             return None
     
     def locationModify(self, locationID: int, locData: dict):
@@ -1039,7 +1049,7 @@ class SQLbuilder:
             return None
 
         except Exception as e:
-            print(f"Error modifying location: {e}")
+            self.log.exception(f"Error modifying location: {e}")
             return None
         
     def updateStatus(self, tblName: str, idColName: str, rowID: int, status: str, statusColName: str = "status"):
@@ -1095,7 +1105,7 @@ class SQLbuilder:
         
     def updateStoryboardStatus(self, storyboardID: int, status: str):
         if storyboardID is None:
-            print("Missing storyboardID")
+            self.log.info("Missing storyboardID")
             return None
 
         try:
@@ -1111,18 +1121,18 @@ class SQLbuilder:
             rows = result.data or []
 
             if not rows:
-                print(f"No storyboard updated for storyboard_id={storyboardID}")
+                self.log.info(f"No storyboard updated for storyboard_id={storyboardID}")
                 return None
 
             return rows[0]
 
         except Exception as e:
-            print(f"Error updating storyboard status: {e}")
+            self.log.exception(f"Error updating storyboard status: {e}")
             return None
     
     def upsertVideoFrames(self, frames: list[dict]):
         if not frames:
-            print("No frames provided")
+            self.log.exception("No frames provided")
             return []
 
         try:
@@ -1143,16 +1153,16 @@ class SQLbuilder:
                 key = (row.get("video_id"), row.get("frame_num"))
                 row["file_path"] = file_path_lookup.get(key)
 
-            print(f"Upserted {len(inserted)} video frame(s)")
+            self.log.info(f"Upserted {len(inserted)} video frame(s)")
             return inserted
 
         except Exception as e:
-            print(f"Error occurred upserting video frames: {e}")
+            self.log.exception(f"Error occurred upserting video frames: {e}")
             return []
         
     def getStoryboardItems(self, storyboardID: int):
         if storyboardID is None:
-            print("Missing storyboardID")
+            self.log.exception("Missing storyboardID")
             return []
 
         try:
@@ -1188,12 +1198,12 @@ class SQLbuilder:
             return cleaned
 
         except Exception as e:
-            print(f"Error fetching storyboard_id={storyboardID}: {e}")
+            self.log.exception(f"Error fetching storyboard_id={storyboardID}: {e}")
             return []
         
     def getStoryboardsByEvent(self, eventID: int):
         if eventID is None:
-            print("Missing eventID")
+            self.log.info("Missing eventID")
             return []
 
         try:
@@ -1209,12 +1219,12 @@ class SQLbuilder:
             return result.data or []
 
         except Exception as e:
-            print(f"Error fetching storyboards for event_id={eventID}: {e}")
+            self.log.exception(f"Error fetching storyboards for event_id={eventID}: {e}")
             return []
 
     def getLatestStoryboardByEvent(self, eventID: int):
         if eventID is None:
-            print("Missing eventID")
+            self.log.exception("Missing eventID")
             return []
 
         try:
@@ -1231,7 +1241,7 @@ class SQLbuilder:
             rows = result.data or []
 
             if not rows:
-                print(f"No storyboard found for event_id={eventID}")
+                self.log.info(f"No storyboard found for event_id={eventID}")
                 return []
 
             storyboardID = rows[0]["storyboard_id"]
@@ -1239,20 +1249,26 @@ class SQLbuilder:
             return self.getStoryboardItems(storyboardID)
 
         except Exception as e:
-            print(f"Error getting latest storyboard for event_id={eventID}: {e}")
+            self.log.exception(f"Error getting latest storyboard for event_id={eventID}: {e}")
             return []
 
-    def createJobQueue(self,promptID: int,jobType: str,status: str = "pending"):
-        if promptID is None:
-            print("Missing promptID")
+    def createJobQueue(self,promptID: int | None,jobType: str,status: str = "pending", uploadID: int | None = None):
+        if promptID is None and jobType != "preprocess":
+            self.log.error("Missing promptID")
             return None
+
 
         try:
             values = {
-                "prompt_id": promptID,
                 "job_type": jobType,
                 "status": status,
             }
+
+            if promptID is not None:
+                values["prompt_id"] = promptID
+
+            if uploadID is not None:
+                values["upload_id"] = uploadID
 
             result = (
                 self.client
@@ -1265,18 +1281,18 @@ class SQLbuilder:
             rows = result.data or []
 
             if not rows:
-                print("Job queue row was not created.")
+                self.log.info("Job queue row was not created.")
                 return None
 
             return rows[0]
 
         except Exception as e:
-            print(f"Error creating job queue row: {e}")
+            self.log.exception(f"Error creating job queue row: {e}")
             return None
         
     def updateJobQueueStatus(self,jobID: int,status: str,errorMessage: str | None = None):
         if jobID is None:
-            print("Missing jobID")
+            self.log.exception("Missing jobID")
             return None
 
         try:
@@ -1307,19 +1323,19 @@ class SQLbuilder:
             rows = result.data or []
 
             if not rows:
-                print(f"No job_queue row updated for job_id={jobID}")
+                self.log.info(f"No job_queue row updated for job_id={jobID}")
                 return None
 
             return rows[0]
 
         except Exception as e:
-            print(f"Error updating job_queue status: {e}")
+            self.log.exception(f"Error updating job_queue status: {e}")
             return None
 
 
     def getJobQueueByID(self, jobID: int):
         if jobID is None:
-            print("Missing jobID")
+            self.log.exception("Missing jobID")
             return None
 
         try:
@@ -1335,14 +1351,67 @@ class SQLbuilder:
             return result.data
 
         except Exception as e:
-            print(f"Error getting job_queue row: {e}")
+            self.log.exception(f"Error getting job_queue row: {e}")
+            return None
+        
+    def updateJobStatus(self, jobID: int, status: str, error_message: str | None = None,prompt_id: int | None = None):
+        if jobID is None:
+            self.log.info("Missing jobID")
+            return None
+
+        if not status:
+            self.log.info("Missing status")
+            return None
+
+        now = datetime.now(timezone.utc).isoformat()
+
+        update_data = {
+            "status": status
+        }
+
+        # If the job starts
+        if status in ["processing", "running", "started"]:
+            update_data["started_at"] = now
+
+        # If the job finishes
+        if status in ["complete", "completed", "success", "failed", "error"]:
+            update_data["finished_at"] = now
+
+        # Save error message if provided
+        if error_message is not None:
+            update_data["error_message"] = error_message
+
+        # Save prompt_id if provided
+        if prompt_id is not None:
+            update_data["prompt_id"] = prompt_id
+
+        try:
+            result = (
+                self.client
+                .table("job_queue")
+                .update(update_data)
+                .eq("job_id", jobID)
+                .execute()
+            )
+
+            updated = result.data or []
+
+            if not updated:
+                self.log.info(f"No job_queue row found for job_id={jobID}")
+                return None
+
+            self.log.info(f"Updated job_queue job_id={jobID} to status={status}")
+            return updated[0]
+
+        except Exception as e:
+            self.log.exception(f"Error updating job_queue status: {e}")
             return None
     
-if __name__ == "__main__":
-    db = SQLbuilder()
-    if db.connect():
-        print("Connected to Supabase.")
+# if __name__ == "__main__":
+#     db = SQLbuilder()
+#     if db.connect():
+#         self.log.info("Connected to Supabase.")
 
-    rows = db.selectAll('app_user')
-    for row in rows or []:
-        print(row)
+#     rows = db.selectAll('app_user')
+#     for row in rows or []:
+#         self.log.info(row)

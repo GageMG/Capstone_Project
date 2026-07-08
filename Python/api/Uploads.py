@@ -129,8 +129,8 @@ class UploadManager:
                 )
 
             except Exception:
-                if self.logger:
-                    self.logger.exception("File upload failed.")
+                if self.log:
+                    self.log.exception("File upload failed.")
 
                 saved.append(
                     asdict(
@@ -173,7 +173,8 @@ class UploadManager:
                 "db_records_inserted": 0,
                 "photo_records_inserted": 0,
                 "video_records_inserted": 0,
-                "results": saved
+                "results": saved,
+                "upload_ids": []
             }
 
         inserted = self.db.insertUploads(uploadRows)
@@ -189,7 +190,17 @@ class UploadManager:
         if not mediaInserts:
             mediaInserts = {"photos": [], "videos": []}
 
+        
         return {
+            "upload_ids": [row["upload_id"] for row in inserted if row.get("upload_id") is not None],
+            "uploads": [
+                {
+                    "upload_id": row.get("upload_id"),
+                    "file_type": row.get("media_type")
+                }
+                for row in inserted
+                if row.get("upload_id") is not None
+            ],
             "event_id": eventID,
             "user_id": userID,
             "guest_id": guestID,
@@ -199,3 +210,4 @@ class UploadManager:
             "video_records_inserted": len(mediaInserts["videos"]),
             "results": saved
         }
+

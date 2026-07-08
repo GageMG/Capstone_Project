@@ -1,11 +1,8 @@
-import json
-import os
 import time
-from azure.storage.queue import QueueClient
 import logging
 import tempfile
 from pathlib import Path
-
+from shared.ProjectHelper import Helpers as ph
 from shared.AzureClass import blobHandler
 from worker.ContentScorer import ContentScoring
 from shared.DBConn import SQLbuilder
@@ -22,22 +19,23 @@ class newRunner:
         self.log = log or logging.getLogger("Worker")
         self.blob = blob or blobHandler(self.log)
         self.db = db or SQLbuilder(self.log)
-        #self.queue = QueueClient.from_connection_string(conn_str=os.getenv("AZURE_STORAGE_CONNECTION_STRING"), queue_name=os.getenv("VIDEO_QUEUE_NAME", "video-jobs"))
+       
         self.cs = ContentScoring(db= self.db, log=self.log)
         self.ir = blipRanker(db= self.db, log=self.log)
         self.pf = ImgQualFilt(db= self.db, log= self.log)
         self.ve = ExtractVidFrames(db= self.db, log= self.log)
-        self.ss = SlideShowGenerator(db=db, log= self.log, azure= self.blob)
+        self.ss = SlideShowGenerator(db=self.db, log= self.log, azure= self.blob)
         self.sb = StoryBoardGen(db=self.db, log=self.log)
 
 
     def manageQueue(self):
-        def updateCall(jobID, update:str):
-            self.db.updateStatus('job_queue', 'job_id', jobID, update)
+        def updateCall(jobID, update:str, err: str | None = None, prompt: int | None = None):
+            self.db.updateJobStatus(jobID, update, err, prompt)
+
+        self.log.info("Queue worker started.") 
 
         while True:
-            msg = self.queue.receive_message(visibility_timeout=300)
-
+            msg = self.blob.queue.receive_message(visibility_timeout=300)
             
             if msg is None:
                 time.sleep(5)
@@ -46,30 +44,47 @@ class newRunner:
             jobID = None
 
             try:
-                data = json.loads(msg.content)
+                self.log.info(f"Raw queue message received: {msg.content}")
+                data = ph.parseQueueMessage(msg.content)
+
+                self.log.info(f"Parsed queue message: {data}")
     
                 eventID = data['event_id']
                 jobType = data['job_type']
                 jobID = data.get("job_id")
 
-                self.log.info(f'Message Received: {msg}')
+                self.log.info(f'Parsed msg Received: {data}')
 
                 
                 if jobType== 'preprocess':
 
                     mediaType = data["type"]
+                    uploadIDs = data.get("upload_ids") or []
+                    
+                    if not uploadIDs and data.get("upload_id") is not None:
+                        uploadIDs = [data.get("upload_id")]
+
                     if mediaType == "photo":
                         mediaType = "photos"
                     elif mediaType == "video":
                         mediaType = 'videos'
 
-                    self.runProcess(eventID, mediaType)
+                    self.log.info(f'Parsed msg Received: {data}')
+
+                    updateCall(jobID, 'processing')
+                    res = self.runProcess(eventID, mediaType, uploadIDs)
+
+                    if res:
+                        updateCall(jobID, 'completed')
+
 
                 elif jobType == 'create':
                     if not jobID:
                         raise ValueError("Missing job_id for video job")
                     
                     storyBoardID = data.get('storyboard_id')
+
+                    self.log.info(f"Running video creation for event_id={eventID}, storyboard_id={storyBoardID}")
 
                     if not storyBoardID:
                         raise ValueError
@@ -83,23 +98,28 @@ class newRunner:
                     
                     videoPath = self.ss.generateVideo(sb, eventID)    
 
-                    updateCall(jobID, 'Completed')
+                    self.log.info(f"Video created successfully: {videoPath}")
+
+                    updateCall(jobID, 'completed')
 
                 else:
                     raise ValueError(f"Unknown job_type: {jobType}")
 
-                self.queue.delete_message(msg)
+                self.blob.queue.delete_message(msg)
 
             except Exception as e:
                 self.log.exception(f"Queue job failed: {e}")
 
                 if jobID:
-                    updateCall(jobID, 'Failed')
+                    updateCall(jobID, 'failed', str(e))
 
-                self.queue.delete_message(msg)
+                self.blob.queue.delete_message(msg)
 
-    def runProcess(self, eventID: int, dt: str = 'photos'):
+    def runProcess(self, eventID: int, dt: str = 'photos', uploadIDs: list[int] | None = None):
+        print(f'Starting Event {eventID}, for {dt}')
         dt = dt.lower().strip()
+        
+        uploadIDs = uploadIDs or []
 
         if dt not in ("photos", "videos"):
             raise ValueError("dt must be either 'photos' or 'videos'")
@@ -113,10 +133,10 @@ class newRunner:
             dt2 = 'video_id'
 
         try:
-            photos = self.db.getMedia(eventID, dt)
-
+            photos = self.db.getMedia(eventID, dt, uploadIDs = uploadIDs or [])
+    
             if not photos or len(photos) == 0:
-                return "No Photos found"
+                raise ValueError(f"No {dt} found to preprocess.")
 
             prefilt = imgRank = contScore = 'Success'
 
@@ -124,10 +144,16 @@ class newRunner:
                 tempDir = Path(tempDir)
                 mediaSet = self.blob.downloadToTemp(photos, tempDir, dt2)
 
+                if not mediaSet:
+                    raise ValueError(f"No {dt} files downloaded for preprocess.")
+
                 if dt == 'videos':
                     videoFlag = 'videos'
                     mediaSet = self.ve.batchRun(videos=mediaSet, tempDir=tempDir, eventID=eventID)
                     dt = 'video_frames'
+
+                    if not mediaSet:
+                        raise ValueError(f"No {dt} files downloaded for preprocess.")
 
                 ids = [row[dType] for row in mediaSet]
 
@@ -157,18 +183,22 @@ class newRunner:
                 self.batchStatus(dt, dType, ids, "completed")
 
                 if videoFlag:
-                    self.batchStatus(videoFlag, dt2, vidID, "processing")
+                    self.batchStatus(videoFlag, dt2, vidID, "completed")
         
             return {f"Pre Filter: {prefilt}\n Results: {pfr}\nImage Ranker: {imgRank}\nResults: {irr}\nContent Score: {contScore}\nResults: {csr}"}
 
         except Exception as e:
             self.log.exception(f"job failed: {e}")
+            raise
 
     def batchStatus(self, tblName, idColName, rowID, Status):
         self.db.batchStatusUodate(tblName=tblName, idColName=idColName, rowIDs=rowID, status= Status)
     
     
         
+# if __name__ == "__main__":
+#     test = newRunner()
+#     res = test.runProcess(1, 'videos')
 if __name__ == "__main__":
-    test = newRunner()
-    res = test.runProcess(1, 'videos')
+    runner = newRunner()
+    runner.manageQueue()

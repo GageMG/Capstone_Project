@@ -1,19 +1,20 @@
 
 import secrets
-from datetime import datetime, timezone
-from pathlib import Path
+from datetime import datetime, timezone, timedelta,date, time
 from urllib.parse import urlencode
-
+from io import BytesIO
 import qrcode
-
+import os
+from uuid import uuid4
 
 class genQR():
-    def __init__(self, db, log, path = "http://localhost:8000"):
-        self.baseUrl = path
-        self.fullUrl = None
+    def __init__(self, db, log, blob, path = None):
+        self.baseUrl = (path    
+            or os.getenv("QR_BASE_URL")
+            or "http://localhost:8000/upload/qr/check?"
+        ).rstrip("/")
         self.log = log
-
-        self.localTesting = Path(r"C:\CSI4999\qrCodes")
+        self.blob = blob
         self.db = db
 
 
@@ -35,6 +36,54 @@ class genQR():
             }
         )
 
+        return f"{self.baseUrl}?{query}"
+    
+    def parseExpiration(self, expirationDate):
+
+
+        if expirationDate is None:
+            return None
+
+        if isinstance(expirationDate, datetime):
+            expires = expirationDate
+
+        elif isinstance(expirationDate, date):
+            expires = datetime.combine(expirationDate, time(23, 59, 59))
+
+        elif isinstance(expirationDate, str):
+            raw = expirationDate.strip()
+
+            formats = [
+                "%m/%d/%y",
+                "%m/%d/%Y",
+                "%Y-%m-%d",
+                "%Y-%m-%dT%H:%M:%S",
+                "%Y-%m-%d %H:%M:%S",
+            ]
+
+            expires = None
+
+            for fmt in formats:
+                try:
+                    expires = datetime.strptime(raw, fmt)
+                    break
+                except ValueError:
+                    pass
+
+            if expires is None:
+                try:
+                    expires = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                except ValueError:
+                    raise ValueError(f"Invalid expiration date format: {expirationDate}")
+
+        else:
+            raise ValueError("Unsupported expiration date type")
+
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=timezone.utc)
+
+        return expires
+
     def generateQRcode(self, eventID:int, expirationDate, maxUpload, purpose = "guests", setActive = True):
         if eventID is None:
             raise ValueError("Event ID is required")
@@ -42,18 +91,32 @@ class genQR():
         token = self.genToken()
         fullUrl = self.generateUrl(eventID=eventID, token=token)
         
-        qrPath = self.localTesting / f"event_{self.eventID}_qr.png"
+        qr = qrcode.make(fullUrl)
+        buffer = BytesIO()
+        qr.save(buffer, format="PNG")
+        qrBytes = buffer.getvalue()
 
-        qr = qrcode.make(self.fullUrl)
-        qr.save(fr"{qrPath}")
+        blobName = f"events/{eventID}/qrcodes/{uuid4().hex}.png"
 
-        expires = datetime.strptime(expirationDate, "%m/%d/%y")
+        uploadResult = self.blob.uploadBytes(blobName=blobName, data=qrBytes, contentType="image/png")
 
-        self.db.postQRtoDB(eventID= eventID, url=str(qrPath), token= self.token, expires_at= expires.isoformat(), max_upload= maxUpload, purpose=purpose, is_active = setActive)
+        if not uploadResult:
+            raise RuntimeError("Failed to upload QR code to Azure Blob Storage")
+
+        qrImageUrl = uploadResult["url"]
+
+        expires = self.parseExpiration(expirationDate)
+
+        if expires is None:
+            expires = datetime.now(timezone.utc) + timedelta(days=100)
+
+        dbRow = self.db.postQRtoDB(eventID= eventID, url=str(qrImageUrl), token= token, expires_at= expires.isoformat(), max_uploads= maxUpload, purpose=purpose, is_active = setActive)
 
         return {
             "event_id": eventID,
-            "qr_path": str(qrPath),
+            "qrcode_row": dbRow,
+            "qr_image_url": qrImageUrl,
+            "qr_blob_name": blobName,
             "qr_url": fullUrl,
             "token": token,
             "expires_at": expires.isoformat(),
@@ -61,9 +124,10 @@ class genQR():
             "purpose": purpose,
             "is_active": setActive
         }
+
     
     def validateQRcode(self, eventID: int, token:str):
-        if token is None or token.strip == "":
+        if token is None or token.strip() == "":
             return False, "Missing Token"
         
         if eventID is None:
