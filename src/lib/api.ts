@@ -8,6 +8,12 @@ export const setToken = (t: string) => {
 
 export const hasToken = () => token.length > 0;
 
+let unauthorizedHandler: (() => void) | null = null;
+
+export const onUnauthorized = (handler: () => void) => {
+  unauthorizedHandler = handler;
+};
+
 export async function apiFetch<T = any>(
   path: string,
   body?: unknown,
@@ -21,6 +27,12 @@ export async function apiFetch<T = any>(
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
+
+  if (res.status === 401 && hasToken()) {
+    setToken("");
+    unauthorizedHandler?.();
+    throw new Error("Your session has expired. Please log in again.");
+  }
 
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));

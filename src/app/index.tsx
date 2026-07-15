@@ -1,5 +1,6 @@
 import FormModal, { FormField } from "@/components/FormModal";
-import { apiFetch, hasToken, setToken } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 import { router } from "expo-router";
@@ -47,6 +48,7 @@ const parseDate = (s: string) => {
 
 export default function WelcomeScreen() {
   const { colors: c } = useTheme();
+  const { loggedIn, signIn } = useAuth();
   const styles = useMemo(() => makeStyles(c), [c]);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -55,6 +57,11 @@ export default function WelcomeScreen() {
   const [loggingIn, setLoggingIn] = useState(false);
 
   const handleLogin = async () => {
+    if (loggedIn) {
+      router.replace("/gallery");
+      return;
+    }
+
     const login = username.trim();
     if (!login || !password) {
       Alert.alert("Missing Info", "Enter your username and password.");
@@ -67,7 +74,7 @@ export default function WelcomeScreen() {
         ...(login.includes("@") ? { email: login } : { user_name: login }),
         pwd: password,
       });
-      setToken(access_token);
+      signIn(access_token);
       router.replace("/gallery");
     } catch (error: any) {
       Alert.alert("Login Failed", error.message ?? "Please try again.");
@@ -95,7 +102,7 @@ export default function WelcomeScreen() {
   };
 
   const handleCreateEvent = async (values: Record<string, string>) => {
-    if (!hasToken()) {
+    if (!loggedIn) {
       Alert.alert("Login Required", "Log in or set EXPO_PUBLIC_JWT_TOKEN in .env first.");
       return;
     }
@@ -195,7 +202,7 @@ export default function WelcomeScreen() {
             disabled={loggingIn}
           >
             <Text style={styles.loginButtonText}>
-              {loggingIn ? "LOGGING IN…" : "LOG IN"}
+              {loggingIn ? "LOGGING IN…" : loggedIn ? "CONTINUE" : "LOG IN"}
             </Text>
             {!loggingIn && <Text style={styles.loginArrow}>→</Text>}
           </TouchableOpacity>

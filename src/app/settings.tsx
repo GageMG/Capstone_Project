@@ -1,32 +1,19 @@
 import { Ionicons } from "@expo/vector-icons";
-import { router } from "expo-router";
-import * as WebBrowser from "expo-web-browser";
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import {
-  Alert,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Switch,
-  Text,
-  TouchableOpacity,
-  View,
+    Alert,
+    Platform,
+    SafeAreaView,
+    ScrollView,
+    StatusBar,
+    StyleSheet,
+    Switch,
+    Text,
+    TouchableOpacity,
+    View,
 } from "react-native";
-import { useAuth } from "@/lib/AuthContext";
-import { ThemeColors } from "@/theme/colors";
-import { useTheme } from "@/theme/ThemeContext";
 
-const VERSION = "1.0.0";
-
-const LINKS: Record<string, string> = {
-  privacy_policy: "https://github.com/GageMG/Capstone_Project#readme",
-  help: "https://github.com/GageMG/Capstone_Project#readme",
-  feedback: "https://github.com/GageMG/Capstone_Project/issues",
-};
-
-// ─── Types
+// ─── Types 
 type SettingToggleItem = {
   type: "toggle";
   id: string;
@@ -64,8 +51,6 @@ function ToggleRow({
   value: boolean;
   onChange: (v: boolean) => void;
 }) {
-  const { colors: c } = useTheme();
-  const row = useMemo(() => makeRowStyles(c), [c]);
   return (
     <View style={row.container}>
       <View style={[row.iconBox, { backgroundColor: item.iconColor + "22" }]}>
@@ -80,15 +65,15 @@ function ToggleRow({
       <Switch
         value={value}
         onValueChange={onChange}
-        trackColor={{ false: c.border, true: c.switchTrackOn }}
-        thumbColor={value ? c.accent : c.switchThumbOff}
-        ios_backgroundColor={c.border}
+        trackColor={{ false: "#1E2A40", true: "#1D4ED8" }}
+        thumbColor={value ? "#3B82F6" : "#3B4A62"}
+        ios_backgroundColor="#1E2A40"
       />
     </View>
   );
 }
 
-// ─── Action Row
+// Action Row
 function ActionRow({
   item,
   onPress,
@@ -96,8 +81,6 @@ function ActionRow({
   item: SettingActionItem;
   onPress: () => void;
 }) {
-  const { colors: c } = useTheme();
-  const row = useMemo(() => makeRowStyles(c), [c]);
   return (
     <TouchableOpacity style={row.container} onPress={onPress} activeOpacity={0.75}>
       <View style={[row.iconBox, { backgroundColor: item.iconColor + "22" }]}>
@@ -114,47 +97,55 @@ function ActionRow({
       <View style={row.right}>
         {item.value && <Text style={row.value}>{item.value}</Text>}
         {!item.destructive && (
-          <Ionicons name="chevron-forward" size={16} color={c.textFaint} />
+          <Ionicons name="chevron-forward" size={16} color="#3B4A62" />
         )}
       </View>
     </TouchableOpacity>
   );
 }
 
-const makeRowStyles = (c: ThemeColors) =>
-  StyleSheet.create({
-    container: {
-      flexDirection: "row",
-      alignItems: "center",
-      paddingVertical: 13,
-      paddingHorizontal: 16,
-      gap: 12,
-    },
-    iconBox: {
-      width: 34,
-      height: 34,
-      borderRadius: 9,
-      alignItems: "center",
-      justifyContent: "center",
-      flexShrink: 0,
-    },
-    text: { flex: 1 },
-    label: {
-      fontSize: 15,
-      color: c.textPrimary,
-      fontWeight: "500",
-      letterSpacing: -0.1,
-    },
-    destructiveText: { color: c.danger },
-    description: {
-      fontSize: 12,
-      color: c.textMuted,
-      marginTop: 2,
-      lineHeight: 16,
-    },
-    right: { flexDirection: "row", alignItems: "center", gap: 6 },
-    value: { fontSize: 14, color: c.textMuted },
-  });
+const row = StyleSheet.create({
+  container: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  iconBox: {
+    width: 34,
+    height: 34,
+    borderRadius: 9,
+    alignItems: "center",
+    justifyContent: "center",
+    flexShrink: 0,
+  },
+  text: { flex: 1 },
+  label: {
+    fontSize: 15,
+    color: "#E8EDF8",
+    fontWeight: "500",
+    letterSpacing: -0.1,
+  },
+  destructiveText: {
+    color: "#F87171",
+  },
+  description: {
+    fontSize: 12,
+    color: "#5A6A85",
+    marginTop: 2,
+    lineHeight: 16,
+  },
+  right: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  value: {
+    fontSize: 14,
+    color: "#5A6A85",
+  },
+});
 
 // ─── Section
 function Section({
@@ -168,8 +159,6 @@ function Section({
   onToggle: (id: string, val: boolean) => void;
   onAction: (id: string) => void;
 }) {
-  const { colors: c } = useTheme();
-  const sec = useMemo(() => makeSecStyles(c), [c]);
   return (
     <View style={sec.wrapper}>
       <Text style={sec.title}>{section.title}</Text>
@@ -185,7 +174,9 @@ function Section({
             ) : (
               <ActionRow item={item} onPress={() => onAction(item.id)} />
             )}
-            {idx < section.items.length - 1 && <View style={sec.divider} />}
+            {idx < section.items.length - 1 && (
+              <View style={sec.divider} />
+            )}
           </View>
         ))}
       </View>
@@ -193,26 +184,29 @@ function Section({
   );
 }
 
-const makeSecStyles = (c: ThemeColors) =>
-  StyleSheet.create({
-    wrapper: { marginBottom: 28 },
-    title: {
-      fontSize: 11,
-      fontWeight: "700",
-      color: c.accent,
-      letterSpacing: 2,
-      marginBottom: 10,
-      paddingHorizontal: 4,
-    },
-    card: {
-      backgroundColor: c.surface,
-      borderRadius: 16,
-      borderWidth: 1,
-      borderColor: c.border,
-      overflow: "hidden",
-    },
-    divider: { height: 1, backgroundColor: c.divider, marginLeft: 62 },
-  });
+const sec = StyleSheet.create({
+  wrapper: { marginBottom: 28 },
+  title: {
+    fontSize: 11,
+    fontWeight: "700",
+    color: "#3B82F6",
+    letterSpacing: 2,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  card: {
+    backgroundColor: "#161C27",
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: "#1E2A40",
+    overflow: "hidden",
+  },
+  divider: {
+    height: 1,
+    backgroundColor: "#1A2235",
+    marginLeft: 62,
+  },
+});
 
 // ─── Settings Data
 const SECTIONS: SettingSection[] = [
@@ -375,7 +369,7 @@ const SECTIONS: SettingSection[] = [
         label: "App Version",
         icon: "information-circle-outline",
         iconColor: "#5A6A85",
-        value: VERSION,
+        value: "1.0.0",
       },
     ],
   },
@@ -408,38 +402,24 @@ const DEFAULT_TOGGLES: Record<string, boolean> = {
   new_photos: true,
   auto_download: false,
   hq: true,
+  dark_mode: true,
   two_factor: false,
   private_profile: false,
 };
 
 // ─── Settings Screen
 export default function SettingsScreen() {
-  const { colors: c, isDark, setDark } = useTheme();
-  const { signOut } = useAuth();
-  const styles = useMemo(() => makeStyles(c), [c]);
   const [toggles, setToggles] = useState(DEFAULT_TOGGLES);
 
   const handleToggle = (id: string, val: boolean) => {
-    if (id === "dark_mode") return setDark(val);
     setToggles((prev) => ({ ...prev, [id]: val }));
   };
 
   const handleAction = (id: string) => {
-    if (LINKS[id]) {
-      WebBrowser.openBrowserAsync(LINKS[id]);
-    } else if (id === "version") {
-      Alert.alert("App Version", `Version ${VERSION}`);
-    } else if (id === "logout") {
+    if (id === "logout") {
       Alert.alert("Log Out", "Are you sure you want to log out?", [
         { text: "Cancel", style: "cancel" },
-        {
-          text: "Log Out",
-          style: "destructive",
-          onPress: () => {
-            signOut();
-            router.replace("/");
-          },
-        },
+        { text: "Log Out", style: "destructive", onPress: () => {} },
       ]);
     } else if (id === "delete") {
       Alert.alert(
@@ -451,14 +431,16 @@ export default function SettingsScreen() {
         ]
       );
     } else {
+      // Navigate or handle per item
       console.log("Action pressed:", id);
     }
   };
 
   return (
     <SafeAreaView style={styles.safe}>
-      <StatusBar barStyle={c.statusBar} />
+      <StatusBar barStyle="light-content" />
 
+      {/* Header */}
       <View style={styles.header}>
         <Text style={styles.eyebrow}>PREFERENCES</Text>
         <Text style={styles.title}>Settings</Text>
@@ -473,7 +455,7 @@ export default function SettingsScreen() {
           <Section
             key={section.title}
             section={section}
-            toggleState={{ ...toggles, dark_mode: isDark }}
+            toggleState={toggles}
             onToggle={handleToggle}
             onAction={handleAction}
           />
@@ -483,24 +465,36 @@ export default function SettingsScreen() {
   );
 }
 
-const makeStyles = (c: ThemeColors) =>
-  StyleSheet.create({
-    safe: { flex: 1, backgroundColor: c.bg },
-    header: { paddingHorizontal: 24, paddingTop: 20, paddingBottom: 16 },
-    eyebrow: {
-      fontSize: 10,
-      fontWeight: "700",
-      color: c.accent,
-      letterSpacing: 2.5,
-      marginBottom: 4,
-    },
-    title: {
-      fontSize: 32,
-      fontWeight: "800",
-      color: c.textBright,
-      letterSpacing: -1,
-      fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
-    },
-    scroll: { flex: 1 },
-    content: { paddingHorizontal: 20, paddingTop: 8, paddingBottom: 40 },
-  });
+const styles = StyleSheet.create({
+  safe: {
+    flex: 1,
+    backgroundColor: "#0D1117",
+  },
+  header: {
+    paddingHorizontal: 24,
+    paddingTop: 20,
+    paddingBottom: 16,
+  },
+  eyebrow: {
+    fontSize: 10,
+    fontWeight: "700",
+    color: "#3B82F6",
+    letterSpacing: 2.5,
+    marginBottom: 4,
+  },
+  title: {
+    fontSize: 32,
+    fontWeight: "800",
+    color: "#F0F4FF",
+    letterSpacing: -1,
+    fontFamily: Platform.OS === "ios" ? "Georgia" : "serif",
+  },
+  scroll: {
+    flex: 1,
+  },
+  content: {
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    paddingBottom: 40,
+  },
+});

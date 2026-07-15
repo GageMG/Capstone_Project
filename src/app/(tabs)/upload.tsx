@@ -16,7 +16,8 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { API_URL, apiFetch, hasToken } from "@/lib/api";
+import { API_URL, apiFetch } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
@@ -32,6 +33,7 @@ type EventOption = { event_id: number; name: string };
 
 export default function UploadScreen() {
   const { colors: c } = useTheme();
+  const { loggedIn } = useAuth();
   const s = useMemo(() => makeStyles(c), [c]);
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -41,11 +43,15 @@ export default function UploadScreen() {
   const [events, setEvents] = useState<EventOption[]>([]);
 
   useEffect(() => {
-    if (!hasToken()) return;
+    setEventId("");
+    if (!loggedIn) {
+      setEvents([]);
+      return;
+    }
     apiFetch("/events/mine")
       .then((res) => setEvents(Array.isArray(res) ? res : res.events ?? []))
       .catch(() => {});
-  }, []);
+  }, [loggedIn]);
 
   const isValidImage = (uri: string) => {
     const lower = uri.toLowerCase();

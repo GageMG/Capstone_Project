@@ -10,7 +10,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { hasToken, setToken } from "@/lib/api";
+import { useAuth } from "@/lib/AuthContext";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
@@ -18,6 +18,7 @@ const HIDDEN_ON = ["/", "/camera"];
 
 export default function AccountButton() {
   const { colors: c } = useTheme();
+  const { loggedIn, signOut: authSignOut } = useAuth();
   const insets = useSafeAreaInsets();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -28,7 +29,7 @@ export default function AccountButton() {
   const top = insets.top + 8;
 
   const signOut = () => {
-    setToken("");
+    authSignOut();
     setOpen(false);
     router.replace("/");
   };
@@ -52,7 +53,7 @@ export default function AccountButton() {
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
         <Pressable style={s.backdrop} onPress={() => setOpen(false)}>
           <Pressable style={[s.popover, { top: top + 48 }]} onPress={() => {}}>
-            {hasToken() ? (
+            {loggedIn ? (
               <>
                 <Text style={s.statusText}>Signed in</Text>
                 <TouchableOpacity style={s.row} onPress={signOut} activeOpacity={0.7}>
