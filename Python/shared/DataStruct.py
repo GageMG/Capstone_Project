@@ -5,17 +5,8 @@ import json
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-@dataclass
-class uploadResults:
-    file_name: str
-    status: str
-    file_type: str | None = None
-    size_bytes: int | None = None
-    url: str | None = None
-    blob_name: str | None = None
-    reason: str | None = None
-    content_type: str | None = None
 
+#user section
 class userCreate(BaseModel):
     user_name: str
     first_name: str
@@ -30,19 +21,14 @@ class userCreate(BaseModel):
     def strip_whitespace(cls, v: str) -> str:
         return v.strip() if isinstance(v, str) else v
     
-class userUpdate(BaseModel):
-    user_name: str = None
-    first_name: str = None
-    last_name: str = None
-    email: str = None
-    phone: str = None
-    role: str = None
-
-    @field_validator("user_name", "first_name", "last_name", "email", mode="before")
+    @field_validator("email")
     @classmethod
-    def strip_whitespace(cls, v):
-        return v.strip() if isinstance(v, str) else v
+    def validate_profile_email(cls, value):
+        if value is not None and ("@" not in value or value.startswith("@")):
+            raise ValueError("A valid email address is required")
 
+        return value.lower() if value is not None else value
+    
 class userResponse(BaseModel):
     user_id: int
     user_name: str
@@ -63,6 +49,86 @@ class userLogin(BaseModel):
             raise ValueError("email or user_name is required")
         return self
     
+class userProfileUpdate(BaseModel):
+    user_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    first_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    last_name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    email: Optional[str] = Field(default=None, min_length=3, max_length=254)
+    phone: Optional[str] = Field(default=None, min_length=1, max_length=50)
+
+    @field_validator(
+        "user_name",
+        "first_name",
+        "last_name",
+        "email",
+        "phone",
+        mode="before",
+    )
+    @classmethod
+    def strip_profile_whitespace(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("email")
+    @classmethod
+    def validate_profile_email(cls, value):
+        if value is not None and ("@" not in value or value.startswith("@")):
+            raise ValueError("A valid email address is required")
+
+        return value.lower() if value is not None else value
+
+    @model_validator(mode="after")
+    def require_profile_change(self):
+        if not self.model_dump(exclude_none=True):
+            raise ValueError("At least one profile field is required")
+
+        return self
+    
+class userPasswordUpdate(BaseModel):
+    current_password: str = Field(..., min_length=1, max_length=1024)
+    new_password: str = Field(..., min_length=8, max_length=1024)
+
+    @model_validator(mode="after")
+    def require_new_password(self):
+        if self.current_password == self.new_password:
+            raise ValueError(
+                "The new password must be different from the current password"
+            )
+
+        return self
+
+class guestSessionRequest(BaseModel):
+    event_id: int = Field(..., gt=0)
+    qr_token: str = Field(..., min_length=1, max_length=2048)
+    display_name: str = Field(..., min_length=1, max_length=150)
+    email: Optional[str] = Field(default=None, max_length=254)
+    phone_number: Optional[str] = Field(default=None, max_length=50)
+
+    @field_validator(
+        "qr_token",
+        "display_name",
+        "email",
+        "phone_number",
+        mode="before",
+    )
+    @classmethod
+    def strip_guest_values(cls, value):
+        if not isinstance(value, str):
+            return value
+
+        value = value.strip()
+        return value or None
+
+    @field_validator("email")
+    @classmethod
+    def validate_guest_email(cls, value):
+        if value is not None and (
+            "@" not in value or value.startswith("@")
+        ):
+            raise ValueError("A valid email address is required")
+
+        return value.lower() if value is not None else value
+    
+#event section
 class eventCreate(BaseModel):
     user_id: int
     name: str
@@ -85,6 +151,18 @@ class eventLocation(BaseModel):
     zip: str
 
     searchable: bool = False
+
+#upload model
+@dataclass
+class uploadResults:
+    file_name: str
+    status: str
+    file_type: str | None = None
+    size_bytes: int | None = None
+    url: str | None = None
+    blob_name: str | None = None
+    reason: str | None = None
+    content_type: str | None = None
 
 class uploadModel(BaseModel):
     eventID: int = Field(..., gt=0)
@@ -156,7 +234,7 @@ class StoryboardCreateRequest(BaseModel):
     event_id: int = Field(..., gt=0)
     request_id: Optional[int] = None
 
-
+    
 class StoryboardVideoRequest(BaseModel):
     event_id: int = Field(..., gt=0)
     storyboard_id: int = Field(..., gt=0)
@@ -2833,8 +2911,8 @@ class MediaMappingConfig:
         "professional": ("professional", "ceremony", "venue_detail"),
         "funny": ("funny", "happy", "friends"),
         "emotional": ("sentimental", "nostalgic", "romantic", "dramatic"),
-        "general": ("general",),
-        "unknown": ("general",),
+        "general": ("general"),
+        "unknown": ("general"),
     }
 
     EVENT_CATEGORY_MAP: dict[str, tuple[str, ...]] = {
@@ -2853,8 +2931,8 @@ class MediaMappingConfig:
         "concert": ("energetic", "dramatic", "friends", "general"),
         "sports": ("energetic", "dramatic", "friends", "happy"),
         "corporate": ("professional", "friends", "venue_detail", "general"),
-        "general": ("general",),
-        "unknown": ("general",),
+        "general": ("general"),
+        "unknown": ("general"),
     }
 
     MUSIC_MOOD_MAP: dict[str, tuple[str, ...]] = {

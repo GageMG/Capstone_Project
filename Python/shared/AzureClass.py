@@ -2,10 +2,11 @@ import os
 from pathlib import Path
 from uuid import uuid4
 from azure.storage.queue import QueueClient
-from azure.storage.blob import BlobServiceClient, ContentSettings
+from azure.storage.blob import (BlobServiceClient,BlobSasPermissions,ContentSettings,generate_blob_sas)
 from dotenv import load_dotenv
 from fastapi import UploadFile
 import json
+from datetime import datetime, timedelta, timezone
 
 class blobHandler:
     def __init__(self, log):
@@ -169,3 +170,33 @@ class blobHandler:
             self.log.exception(errMsg)
             return None
 
+    def getSignedBlobUrl(self,blobName: str,expiresInMinutes: int = 15):
+        if not blobName:
+            return None
+
+        credential = self.blobClient.credential
+        account_key = getattr(credential, "account_key", None)
+
+        if not account_key:
+            raise RuntimeError(
+                "Azure account-key credentials are required "
+                "to generate a blob SAS URL"
+            )
+
+        expires_at = (datetime.now(timezone.utc)+ timedelta(minutes=expiresInMinutes))
+
+        sas_token = generate_blob_sas(
+            account_name=self.blobClient.account_name,
+            container_name=self.container,
+            blob_name=blobName,
+            account_key=account_key,
+            permission=BlobSasPermissions(read=True),
+            expiry=expires_at,
+        )
+
+        blob_client = self.containerClient.get_blob_client(blobName)
+
+        return {
+            "url": f"{blob_client.url}?{sas_token}",
+            "expires_at": expires_at.isoformat(),
+        }

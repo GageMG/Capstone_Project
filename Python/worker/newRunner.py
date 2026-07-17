@@ -32,7 +32,7 @@ def setup_logger(name: str = "workerLog") -> logging.Logger:
 
     log_format = logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
 
-    file_handler = RotatingFileHandler(os.path.join(LOG_DIR, LOG_FILE),maxBytes=10_000_000,backupCount=5,)
+    file_handler = RotatingFileHandler(os.path.join(LOG_DIR, LOG_FILE),maxBytes=10_000_000,backupCount=5)
     file_handler.setFormatter(log_format)
 
     console_handler = logging.StreamHandler()

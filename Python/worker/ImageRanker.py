@@ -246,7 +246,7 @@ class blipRanker():
             score = float(result.get("score", 0))
             category = labelMap.get(label, "general")
 
-            categoryScores[category] = max(categoryScores.get(category, 0.0),score,)
+            categoryScores[category] = max(categoryScores.get(category, 0.0),score)
 
         bestCategory = labelMap.get(bestLabel, "general")
 

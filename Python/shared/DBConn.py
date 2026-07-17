@@ -1948,3 +1948,211 @@ class SQLbuilder:
                 f"Error fetching music_id={musicID}: {e}"
             )
             return None  
+    def updateUserProfile(self,userID: int,profileData: dict):
+        if not userID or not profileData:
+            return None
+
+        try:
+            values = dict(profileData)
+            values["last_updated"] = (
+                datetime.now(timezone.utc).isoformat()
+            )
+
+            result = (
+                self.client
+                .table("app_user")
+                .update(values)
+                .eq("user_id", userID)
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception as e:
+            self.log.exception(f"Error updating user_id={userID}: {e}")
+            return None
+        
+    def getUserPasswordByID(self, userID: int):
+        if not userID:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("app_user")
+                .select("user_id,password_hash")
+                .eq("user_id", userID)
+                .limit(1)
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception as e:
+            self.log.exception(f"Error getting password for user_id={userID}: {e}")
+            return None
+        
+    def updateUserPassword(self,userID: int,passwordHash: str):
+        if not userID or not passwordHash:
+            return False
+
+        try:
+            result = (
+                self.client
+                .table("app_user")
+                .update({
+                    "password_hash": passwordHash,
+                    "last_updated": (
+                        datetime.now(timezone.utc).isoformat()
+                    ),
+                })
+                .eq("user_id", userID)
+                .execute()
+            )
+
+            return bool(result.data)
+
+        except Exception as e:
+            self.log.exception(f"Error updating password for user_id={userID}: {e}")
+            return False
+        
+    def createOrGetGuestSession(self, guestData: dict):
+        if (
+            not guestData
+            or not guestData.get("event_id")
+            or not guestData.get("display_name")
+        ):
+            return None
+
+        try:
+            existing = []
+            email = guestData.get("email")
+            phone = guestData.get("phone_number")
+
+            if email:
+                result = (
+                    self.client
+                    .table("guests")
+                    .select(
+                        "guest_id,event_id,display_name,email,"
+                        "phone_number,can_post,created_at"
+                    )
+                    .eq("event_id", guestData["event_id"])
+                    .eq("email", email)
+                    .limit(1)
+                    .execute()
+                )
+
+                existing = result.data or []
+
+            elif phone:
+                result = (
+                    self.client
+                    .table("guests")
+                    .select(
+                        "guest_id,event_id,display_name,email,"
+                        "phone_number,can_post,created_at"
+                    )
+                    .eq("event_id", guestData["event_id"])
+                    .eq("phone_number", phone)
+                    .limit(1)
+                    .execute()
+                )
+
+                existing = result.data or []
+
+            if existing:
+                return existing[0]
+
+            result = (
+                self.client
+                .table("guests")
+                .insert({
+                    "event_id": guestData["event_id"],
+                    "display_name": guestData["display_name"],
+                    "email": email,
+                    "phone_number": phone,
+                    "can_post": True,
+                })
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception as e:
+            self.log.exception(f"Error creating guest session: {e}")
+            return None
+        
+    def getGuestForEvent(self,guestID: int,eventID: int):
+        if not guestID or not eventID:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("guests")
+                .select(
+                    "guest_id,event_id,display_name,email,"
+                    "phone_number,can_post,created_at"
+                )
+                .eq("guest_id", guestID)
+                .eq("event_id", eventID)
+                .limit(1)
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception as e:
+            self.log.exception(f"Error getting guest_id={guestID} for event_id={eventID}: {e}")
+            return None
+    
+    def getGeneratedVideosByEvent(self, eventID: int):
+        if not eventID:
+            return []
+
+        try:
+            result = (
+                self.client
+                .table("generated_videos")
+                .select(
+                    "gen_vid_id,event_id,music_id,title,"
+                    "file_name,file_path,video_type,status,"
+                    "duration_seconds,width,height,fps,file_size,"
+                    "created_at,last_updated"
+                )
+                .eq("event_id", eventID)
+                .order("created_at", desc=True)
+                .execute()
+            )
+
+            return result.data or []
+
+        except Exception as e:
+            self.log.exception(f"Error loading generated videos for event_id={eventID}: {e}")
+            return None
+
+    def getGeneratedVideoByID(self, generatedVideoID: int):
+        if not generatedVideoID:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("generated_videos")
+                .select(
+                    "gen_vid_id,event_id,music_id,title,"
+                    "file_name,file_path,video_type,status,"
+                    "duration_seconds,width,height,fps,file_size,"
+                    "created_at,last_updated"
+                )
+                .eq("gen_vid_id", generatedVideoID)
+                .limit(1)
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception as e:
+            self.log.exception(f"Error loading generated video id={generatedVideoID}: {e}")
+            return None

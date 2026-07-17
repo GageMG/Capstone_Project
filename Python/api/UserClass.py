@@ -7,8 +7,76 @@ class Users:
             self.db = db
             self.log = log
   
+    def verifyCreatePW(self, pw: str):
+        reqMinLen = 8
+        reqMaxLen = 15
+        pwLen = len(pw)
+        specialSym = ['$', '@', '#', '%']
+        valid = True
+        reason = []
+
+        hasDigit = False
+        hasUppercase = False
+        hasLowercase = False
+        hasSpecial = False
+
+        for char in pw:
+            if char.isdigit():
+                hasDigit = True
+            elif char.isupper():
+                hasUppercase = True
+            elif char.islower():
+                hasLowercase = True
+
+            if char in specialSym:
+                hasSpecial = True
+
+        if pwLen < reqMinLen:
+            valid = False
+            reason.append(f"password must be at least length {reqMinLen} current pw: {pwLen}")
+
+        if pwLen > reqMaxLen:
+            valid = False
+            reason.append(f"password must be no more than length {reqMaxLen} current pw: {pwLen}")
+
+        if not hasDigit:
+            valid = False
+            reason.append("password must have at least one numeral")
+
+        if not hasUppercase:
+            valid = False
+            reason.append("password must have at least one uppercase letter")
+
+        if not hasLowercase:
+            valid = False
+            reason.append("password must have at least one lowercase letter")
+
+        if not hasSpecial:
+            valid = False
+            reason.append("password must have at least one of the symbols $@#%")
+
+        problemDict = {
+            'valid': valid,
+            'reason': reason if not valid else ["Password valid"],
+            'has_digit': hasDigit,
+            'has_uppercase': hasUppercase,
+            'has_lowercase': hasLowercase,
+            'has_symbol': hasSpecial,
+            'min_length': pwLen >= reqMinLen,
+            'max_length': pwLen <= reqMaxLen
+        }
+
+        return problemDict
+        
+       
+        
     def createUser(self, user: ds.userCreate):
         userData = user.model_dump(exclude={"pwd"})
+        
+        pwResult = self.verifyCreatePW(user.pwd)
+        if not pwResult['valid']:
+            return  False, pwResult['reason']
+        
         userData["password_hash"] = ph.hashPwd(user.pwd)
         
         res = self.db.insertUser(userData)
@@ -17,12 +85,13 @@ class Users:
         del userData
 
         if not res:
-            return None
+            return False, ["User could not be created."]
         
         return res
     
-    def updateUser(self, userID: int):
-        print('place')
+    def updateUser(self,userID: int,user: ds.userProfileUpdate,):
+        changes = user.model_dump(exclude_none=True)
+        return self.db.updateUserProfile(userID, changes)
     
     def getUserData(self, userID:int):
         return self.db.getUserInfo(userID)
@@ -47,20 +116,22 @@ class Users:
         print('Valid password')
         return user["user_id"]
 
+    def changePassword(self,userID: int,currentPassword: str,newPassword: str,):
+        user = self.db.getUserPasswordByID(userID)
 
-if __name__ == "__main__":
-    testUser = ds.userCreate(
-        user_name="testuser100",
-        first_name="Test",
-        last_name="User",
-        email="testuser5@example.com",
-        phone="555-555-5555",
-        role="user",
-        pwd="TestPassword123!"
-    )
+        if not user:
+            return "not_found"
+        
+        pwResult = self.verifyCreatePW(user.pwd)
+        if not pwResult['valid']:
+            return  pwResult['reason']
 
-    #test = ds.userLogin(email= "testuser5@example.com", pwd="TestPassword123!")
-    userService = Users()
-    res = userService.createUser(testUser)
-    #result = userService.loginUser(test)
-    print(res)
+        if not ph.verifyPwd(currentPassword,user["password_hash"]):
+            return "invalid_password"
+
+        password_hash = ph.hashPwd(newPassword)
+
+        if not self.db.updateUserPassword(userID,password_hash):
+            return "failed"
+
+        return "updated"
