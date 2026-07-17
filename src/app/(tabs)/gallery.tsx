@@ -15,7 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { API_URL } from "@/lib/api";
+import { apiFetch } from "@/lib/api";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
@@ -32,6 +32,71 @@ type Gallery = {
   accentColor: string;
   photos: Photo[];
 };
+
+type EventRecord = {
+  event_id: number;
+  name: string;
+  type: string;
+  event_date: string;
+};
+
+type EventsResponse = {
+  count: number;
+  events: EventRecord[];
+};
+
+type MediaRecord = {
+  id: number;
+  display_url: string | null;
+};
+
+type EventMediaResponse = {
+  photo_count: number;
+  photos: MediaRecord[];
+};
+
+const GALLERY_COLORS = [
+  { cover: "#1A2F5A", accent: "#3B82F6" },
+  { cover: "#312E81", accent: "#8B5CF6" },
+  { cover: "#164E63", accent: "#06B6D4" },
+  { cover: "#78350F", accent: "#F59E0B" },
+];
+
+function formatEventDate(value: string) {
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, {
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+async function loadGallery(event: EventRecord, index: number): Promise<Gallery> {
+  const media = await apiFetch<EventMediaResponse>(
+    `/events/${event.event_id}/media?dataType=photos`
+  );
+  const palette = GALLERY_COLORS[index % GALLERY_COLORS.length];
+  const photos = media.photos
+    .filter(
+      (photo): photo is MediaRecord & { display_url: string } =>
+        typeof photo.display_url === "string" && photo.display_url.length > 0
+    )
+    .map((photo) => ({
+      id: String(photo.id),
+      uri: photo.display_url,
+    }));
+
+  return {
+    id: String(event.event_id),
+    title: event.name,
+    date: formatEventDate(event.event_date),
+    photoCount: photos.length,
+    coverColor: palette.cover,
+    accentColor: palette.accent,
+    photos,
+  };
+}
 
 // Photo Lightbox
 function Lightbox({
@@ -340,22 +405,32 @@ export default function GalleryScreen() {
   const [selectedGallery, setSelectedGallery] = useState<Gallery | null>(null);
 
   useEffect(() => {
-    const controller = new AbortController();
+    let cancelled = false;
 
     (async () => {
       try {
-        const response = await fetch(`${API_URL}/events`, { signal: controller.signal });
-        if (!response.ok) throw new Error("Failed to fetch galleries");
-        setGalleries(await response.json());
-        setLoading(false);
-      } catch (err: any) {
-        if (err.name === "AbortError") return;
-        setError(err.message);
-        setLoading(false);
+        const response = await apiFetch<EventsResponse>("/users/me/events");
+        const loaded = await Promise.all(
+          response.events.map((event, index) => loadGallery(event, index))
+        );
+        if (!cancelled) {
+          setGalleries(loaded);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(
+            err instanceof Error ? err.message : "Could not load galleries."
+          );
+        }
+      } finally {
+        if (!cancelled) setLoading(false);
       }
     })();
 
-    return () => controller.abort();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return (

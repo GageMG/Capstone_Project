@@ -76,7 +76,12 @@ else:
     app = fastapi.FastAPI(title='CSI4999')
 uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
 
-ALLOWED_ORIGINS = ['csi4999-api-h4exhuc3b3btafg3.eastus-01.azurewebsites.net','https://zealous-stone-0f78c580f.7.azurestaticapps.net/', "http://localhost:3000","http://localhost:5173",]
+ALLOWED_ORIGINS = [
+    "https://zealous-stone-0f78c580f.7.azurestaticapps.net",
+    "http://localhost:8081",
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
 
 app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
@@ -249,7 +254,12 @@ else:
     app = fastapi.FastAPI(title='CSI4999')
 uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
 
-ALLOWED_ORIGINS = ['csi4999-api-h4exhuc3b3btafg3.eastus-01.azurewebsites.net','https://zealous-stone-0f78c580f.7.azurestaticapps.net/', "http://localhost:3000","http://localhost:5173",]
+ALLOWED_ORIGINS = [
+    "https://zealous-stone-0f78c580f.7.azurestaticapps.net",
+    "http://localhost:8081",
+    "http://localhost:3000",
+    "http://localhost:5173",
+]
 
 app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
 
@@ -785,7 +795,7 @@ def modifyEvent(eventID: int, event: dc.eventModify, current_user_id: int = Depe
         "event": result
     }
 
-@app.get("/events/user/mine")
+@app.get("/users/me/events")
 def getMyEvents(current_user_id: int = Depends(getCurrentUserID)):
     events = db.getMyEvents(current_user_id)
 
