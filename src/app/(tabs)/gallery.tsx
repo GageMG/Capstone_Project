@@ -15,6 +15,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import GeneratedVideoPlayer from "@/components/GeneratedVideoPlayer";
 import { apiFetch } from "@/lib/api";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
@@ -23,14 +24,23 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const CARD_WIDTH = (SCREEN_WIDTH - 48) / 2;
 
 type Photo = { id: string; uri: string };
+type UploadedVideo = {
+  id: string;
+  uri: string;
+  title: string;
+  durationSeconds: number | null;
+};
+
 type Gallery = {
   id: string;
   title: string;
   date: string;
   photoCount: number;
+  videoCount: number;
   coverColor: string;
   accentColor: string;
   photos: Photo[];
+  videos: UploadedVideo[];
 };
 
 type EventRecord = {
@@ -48,11 +58,16 @@ type EventsResponse = {
 type MediaRecord = {
   id: number;
   display_url: string | null;
+  original_file_name?: string | null;
+  title?: string | null;
+  duration_seconds?: number | null;
 };
 
 type EventMediaResponse = {
   photo_count: number;
+  video_count: number;
   photos: MediaRecord[];
+  videos: MediaRecord[];
 };
 
 const GALLERY_COLORS = [
@@ -74,7 +89,7 @@ function formatEventDate(value: string) {
 
 async function loadGallery(event: EventRecord, index: number): Promise<Gallery> {
   const media = await apiFetch<EventMediaResponse>(
-    `/events/${event.event_id}/media?dataType=photos`
+    `/events/${event.event_id}/media?dataType=both`
   );
   const palette = GALLERY_COLORS[index % GALLERY_COLORS.length];
   const photos = media.photos
@@ -86,15 +101,31 @@ async function loadGallery(event: EventRecord, index: number): Promise<Gallery> 
       id: String(photo.id),
       uri: photo.display_url,
     }));
+  const videos = media.videos
+    .filter(
+      (video): video is MediaRecord & { display_url: string } =>
+        typeof video.display_url === "string" && video.display_url.length > 0
+    )
+    .map((video) => ({
+      id: String(video.id),
+      uri: video.display_url,
+      title:
+        video.title ||
+        video.original_file_name ||
+        `Uploaded video ${video.id}`,
+      durationSeconds: video.duration_seconds ?? null,
+    }));
 
   return {
     id: String(event.event_id),
     title: event.name,
     date: formatEventDate(event.event_date),
     photoCount: photos.length,
+    videoCount: videos.length,
     coverColor: palette.cover,
     accentColor: palette.accent,
     photos,
+    videos,
   };
 }
 
@@ -204,6 +235,181 @@ const lb = StyleSheet.create({
   dotActive: { backgroundColor: "#3B82F6", width: 18 },
 });
 
+function formatDuration(seconds: number | null) {
+  if (seconds === null || !Number.isFinite(seconds) || seconds < 0) {
+    return "Video";
+  }
+
+  const rounded = Math.round(seconds);
+  const minutes = Math.floor(rounded / 60);
+  const remainingSeconds = rounded % 60;
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function UploadedVideoModal({
+  eventId,
+  video,
+  onClose,
+}: {
+  eventId: number;
+  video: UploadedVideo;
+  onClose: () => void;
+}) {
+  const { colors: c } = useTheme();
+  const [freshVideo, setFreshVideo] = useState<UploadedVideo | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const media = await apiFetch<EventMediaResponse>(
+          `/events/${eventId}/media?dataType=videos`
+        );
+        const current = media.videos.find(
+          (item) => String(item.id) === video.id
+        );
+
+        if (!current?.display_url) {
+          throw new Error("This uploaded video is no longer available.");
+        }
+
+        if (!cancelled) {
+          setFreshVideo({
+            ...video,
+            uri: current.display_url,
+            title:
+              current.title ||
+              current.original_file_name ||
+              video.title,
+            durationSeconds:
+              current.duration_seconds ?? video.durationSeconds,
+          });
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(
+            caught instanceof Error
+              ? caught.message
+              : "The uploaded video could not be loaded."
+          );
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [eventId, video]);
+
+  return (
+    <Modal visible animationType="fade" statusBarTranslucent>
+      <SafeAreaView style={[videoModal.container, { backgroundColor: c.bg }]}>
+        <StatusBar barStyle={c.statusBar} />
+        <View style={videoModal.header}>
+          <View style={videoModal.headerText}>
+            <Text
+              numberOfLines={1}
+              style={[videoModal.title, { color: c.textBright }]}
+            >
+              {video.title}
+            </Text>
+            <Text style={[videoModal.meta, { color: c.textMuted }]}>
+              Uploaded video
+            </Text>
+          </View>
+          <TouchableOpacity
+            accessibilityLabel="Close video"
+            onPress={onClose}
+            style={[
+              videoModal.closeButton,
+              { backgroundColor: c.surface, borderColor: c.border },
+            ]}
+          >
+            <Ionicons name="close" size={24} color={c.textBright} />
+          </TouchableOpacity>
+        </View>
+        <View style={videoModal.playerArea}>
+          {error ? (
+            <View style={videoModal.center}>
+              <Ionicons
+                name="alert-circle-outline"
+                size={42}
+                color={c.danger}
+              />
+              <Text style={[videoModal.error, { color: c.danger }]}>
+                {error}
+              </Text>
+            </View>
+          ) : freshVideo ? (
+            <GeneratedVideoPlayer
+              key={freshVideo.uri}
+              streamUrl={freshVideo.uri}
+            />
+          ) : (
+            <View style={videoModal.center}>
+              <ActivityIndicator size="large" color={c.accent} />
+              <Text style={{ color: c.textMuted }}>Loading video...</Text>
+            </View>
+          )}
+        </View>
+      </SafeAreaView>
+    </Modal>
+  );
+}
+
+const videoModal = StyleSheet.create({
+  container: {
+    flex: 1,
+  },
+  header: {
+    width: "100%",
+    maxWidth: 1100,
+    alignSelf: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 16,
+  },
+  headerText: {
+    flex: 1,
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: "800",
+  },
+  meta: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  closeButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 12,
+    borderWidth: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  playerArea: {
+    flex: 1,
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+  },
+  center: {
+    minHeight: 280,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
+  },
+  error: {
+    textAlign: "center",
+    paddingHorizontal: 24,
+  },
+});
+
 //Gallery Detail Modal
 function GalleryDetail({
   gallery,
@@ -215,6 +421,12 @@ function GalleryDetail({
   const { colors: c } = useTheme();
   const gd = useMemo(() => makeDetailStyles(c), [c]);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
+  const [selectedVideo, setSelectedVideo] = useState<UploadedVideo | null>(
+    null
+  );
+  const [mediaTab, setMediaTab] = useState<"photos" | "videos">(
+    gallery.photos.length > 0 ? "photos" : "videos"
+  );
   const numCols = 3;
   const cellSize = (SCREEN_WIDTH - 4) / numCols;
 
@@ -230,7 +442,8 @@ function GalleryDetail({
             <View style={gd.headerText}>
               <Text style={gd.title}>{gallery.title}</Text>
               <Text style={gd.meta}>
-                {gallery.date} · {gallery.photoCount} photos
+                {gallery.date} · {gallery.photoCount} photos ·{" "}
+                {gallery.videoCount} videos
               </Text>
             </View>
             <View
@@ -239,31 +452,161 @@ function GalleryDetail({
           </View>
         </SafeAreaView>
         <View style={[gd.divider, { backgroundColor: gallery.accentColor }]} />
-        <FlatList
-          data={gallery.photos}
-          numColumns={numCols}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={gd.grid}
-          renderItem={({ item, index }) => (
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={() => setLightboxIndex(index)}
-              style={[gd.cell, { width: cellSize, height: cellSize }]}
+        <View style={gd.tabs}>
+          <TouchableOpacity
+            onPress={() => setMediaTab("photos")}
+            style={[
+              gd.tab,
+              mediaTab === "photos" && {
+                backgroundColor: gallery.accentColor,
+              },
+            ]}
+          >
+            <Ionicons
+              name="images-outline"
+              size={17}
+              color={mediaTab === "photos" ? "#fff" : c.textMuted}
+            />
+            <Text
+              style={[
+                gd.tabText,
+                { color: mediaTab === "photos" ? "#fff" : c.textMuted },
+              ]}
             >
-              <Image
-                source={{ uri: item.uri }}
-                style={gd.cellImage}
-                resizeMode="cover"
-              />
-              <View style={gd.cellOverlay} />
-            </TouchableOpacity>
-          )}
-        />
+              Photos ({gallery.photoCount})
+            </Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            onPress={() => setMediaTab("videos")}
+            style={[
+              gd.tab,
+              mediaTab === "videos" && {
+                backgroundColor: gallery.accentColor,
+              },
+            ]}
+          >
+            <Ionicons
+              name="videocam-outline"
+              size={18}
+              color={mediaTab === "videos" ? "#fff" : c.textMuted}
+            />
+            <Text
+              style={[
+                gd.tabText,
+                { color: mediaTab === "videos" ? "#fff" : c.textMuted },
+              ]}
+            >
+              Videos ({gallery.videoCount})
+            </Text>
+          </TouchableOpacity>
+        </View>
+        {mediaTab === "photos" ? (
+          <FlatList
+            key="photos"
+            data={gallery.photos}
+            numColumns={numCols}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={[
+              gd.grid,
+              gallery.photos.length === 0 && gd.emptyList,
+            ]}
+            ListEmptyComponent={
+              <View style={gd.empty}>
+                <Ionicons
+                  name="images-outline"
+                  size={38}
+                  color={c.textFaint}
+                />
+                <Text style={[gd.emptyText, { color: c.textMuted }]}>
+                  No uploaded photos yet.
+                </Text>
+              </View>
+            }
+            renderItem={({ item, index }) => (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setLightboxIndex(index)}
+                style={[gd.cell, { width: cellSize, height: cellSize }]}
+              >
+                <Image
+                  source={{ uri: item.uri }}
+                  style={gd.cellImage}
+                  resizeMode="cover"
+                />
+                <View style={gd.cellOverlay} />
+              </TouchableOpacity>
+            )}
+          />
+        ) : (
+          <FlatList
+            key="videos"
+            data={gallery.videos}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={[
+              gd.videoList,
+              gallery.videos.length === 0 && gd.emptyList,
+            ]}
+            ListEmptyComponent={
+              <View style={gd.empty}>
+                <Ionicons
+                  name="videocam-outline"
+                  size={42}
+                  color={c.textFaint}
+                />
+                <Text style={[gd.emptyText, { color: c.textMuted }]}>
+                  No uploaded videos yet.
+                </Text>
+              </View>
+            }
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => setSelectedVideo(item)}
+                style={[
+                  gd.videoRow,
+                  { backgroundColor: c.surface, borderColor: c.border },
+                ]}
+              >
+                <View
+                  style={[
+                    gd.videoIcon,
+                    { backgroundColor: gallery.coverColor },
+                  ]}
+                >
+                  <Ionicons name="play" size={24} color="#fff" />
+                </View>
+                <View style={gd.videoInfo}>
+                  <Text
+                    numberOfLines={1}
+                    style={[gd.videoTitle, { color: c.textPrimary }]}
+                  >
+                    {item.title}
+                  </Text>
+                  <Text style={[gd.videoMeta, { color: c.textMuted }]}>
+                    {formatDuration(item.durationSeconds)}
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={c.textFaint}
+                />
+              </TouchableOpacity>
+            )}
+          />
+        )}
         {lightboxIndex !== null && (
           <Lightbox
             photos={gallery.photos}
             startIndex={lightboxIndex}
             onClose={() => setLightboxIndex(null)}
+          />
+        )}
+        {selectedVideo && (
+          <UploadedVideoModal
+            eventId={Number(gallery.id)}
+            video={selectedVideo}
+            onClose={() => setSelectedVideo(null)}
           />
         )}
       </View>
@@ -306,12 +649,81 @@ const makeDetailStyles = (c: ThemeColors) =>
       opacity: 0.5,
       marginBottom: 2,
     },
+    tabs: {
+      flexDirection: "row",
+      alignSelf: "center",
+      gap: 8,
+      paddingHorizontal: 16,
+      paddingVertical: 14,
+    },
+    tab: {
+      minHeight: 38,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      borderRadius: 20,
+      paddingHorizontal: 16,
+      paddingVertical: 8,
+    },
+    tabText: {
+      fontSize: 13,
+      fontWeight: "700",
+    },
     grid: { gap: 2 },
+    emptyList: {
+      flexGrow: 1,
+      justifyContent: "center",
+    },
+    empty: {
+      minHeight: 240,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+    },
+    emptyText: {
+      fontSize: 14,
+    },
     cell: { overflow: "hidden" },
     cellImage: { width: "100%", height: "100%" },
     cellOverlay: {
       ...StyleSheet.absoluteFillObject,
       backgroundColor: "rgba(13,17,23,0.1)",
+    },
+    videoList: {
+      width: "100%",
+      maxWidth: 900,
+      alignSelf: "center",
+      paddingHorizontal: 16,
+      paddingBottom: 24,
+      gap: 10,
+    },
+    videoRow: {
+      minHeight: 84,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 14,
+      borderWidth: 1,
+      borderRadius: 14,
+      padding: 12,
+    },
+    videoIcon: {
+      width: 58,
+      height: 58,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    videoInfo: {
+      flex: 1,
+    },
+    videoTitle: {
+      fontSize: 15,
+      fontWeight: "700",
+    },
+    videoMeta: {
+      fontSize: 12,
+      marginTop: 4,
     },
   });
 
@@ -332,14 +744,28 @@ function GalleryCard({
       onPress={onPress}
     >
       <View style={[gc.cover, { backgroundColor: gallery.coverColor }]}>
-        <Image
-          source={{ uri: gallery.photos[0]?.uri }}
-          style={gc.coverImage}
-          resizeMode="cover"
-        />
-        <View style={[gc.badge, { backgroundColor: gallery.accentColor }]}>
-          <Ionicons name="images" size={10} color="#fff" />
-          <Text style={gc.badgeText}>{gallery.photoCount}</Text>
+        {gallery.photos[0] ? (
+          <Image
+            source={{ uri: gallery.photos[0].uri }}
+            style={gc.coverImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={gc.emptyCover}>
+            <Ionicons name="videocam" size={34} color="#fff" />
+          </View>
+        )}
+        <View style={gc.badges}>
+          <View style={[gc.badge, { backgroundColor: gallery.accentColor }]}>
+            <Ionicons name="images" size={10} color="#fff" />
+            <Text style={gc.badgeText}>{gallery.photoCount}</Text>
+          </View>
+          {gallery.videoCount > 0 ? (
+            <View style={[gc.badge, { backgroundColor: "#111827" }]}>
+              <Ionicons name="videocam" size={11} color="#fff" />
+              <Text style={gc.badgeText}>{gallery.videoCount}</Text>
+            </View>
+          ) : null}
         </View>
         <View style={[gc.accentBar, { backgroundColor: gallery.accentColor }]} />
       </View>
@@ -364,10 +790,21 @@ const makeCardStyles = (c: ThemeColors) =>
     },
     cover: { height: CARD_WIDTH * 0.75, width: "100%", overflow: "hidden" },
     coverImage: { width: "100%", height: "100%", opacity: 0.85 },
-    badge: {
+    emptyCover: {
+      width: "100%",
+      height: "100%",
+      alignItems: "center",
+      justifyContent: "center",
+      opacity: 0.8,
+    },
+    badges: {
       position: "absolute",
       top: 8,
       right: 8,
+      flexDirection: "row",
+      gap: 6,
+    },
+    badge: {
       flexDirection: "row",
       alignItems: "center",
       gap: 4,

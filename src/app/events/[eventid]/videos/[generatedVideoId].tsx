@@ -15,6 +15,7 @@ import {
 
 import GeneratedVideoPlayer from "@/components/GeneratedVideoPlayer";
 import { useAuth } from "@/lib/AuthContext";
+import { downloadVideo } from "@/lib/downloadVideo";
 import {
   GeneratedVideoPlayback,
   getGeneratedVideoPlayback,
@@ -41,6 +42,8 @@ export default function GeneratedVideoScreen() {
     useState<GeneratedVideoPlayback | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   async function loadPlaybackUrl() {
     if (!validVideoId) {
@@ -72,6 +75,36 @@ export default function GeneratedVideoScreen() {
     }
     loadPlaybackUrl();
   }, [generatedVideoId, loggedIn, ready]);
+
+  async function handleDownload() {
+    if (!playback || downloading) return;
+
+    setDownloading(true);
+    setDownloadError(null);
+
+    try {
+      let downloadSource = playback;
+      const expiresIn = new Date(playback.expires_at).getTime() - Date.now();
+
+      if (expiresIn < 60_000) {
+        downloadSource = await getGeneratedVideoPlayback(generatedVideoId);
+        setPlayback(downloadSource);
+      }
+
+      await downloadVideo(
+        downloadSource.stream_url,
+        `event-${downloadSource.event_id}-video-${downloadSource.generated_video_id}.mp4`
+      );
+    } catch (caught) {
+      setDownloadError(
+        caught instanceof Error
+          ? caught.message
+          : "The video could not be downloaded."
+      );
+    } finally {
+      setDownloading(false);
+    }
+  }
 
   const expiresAt = playback
     ? new Date(playback.expires_at).toLocaleString()
@@ -147,26 +180,55 @@ export default function GeneratedVideoScreen() {
                 <Text style={[styles.expiry, { color: colors.textMuted }]}>
                   Secure playback link expires {expiresAt}
                 </Text>
-                <TouchableOpacity
-                  accessibilityLabel="Refresh secure video link"
-                  onPress={loadPlaybackUrl}
-                  style={[
-                    styles.refreshButton,
-                    { borderColor: colors.border },
-                  ]}
-                >
-                  <Ionicons
-                    name="refresh"
-                    size={18}
-                    color={colors.accent}
-                  />
-                  <Text
-                    style={[styles.refreshText, { color: colors.accent }]}
+                <View style={styles.playbackActions}>
+                  <TouchableOpacity
+                    accessibilityLabel="Download generated video"
+                    disabled={downloading}
+                    onPress={handleDownload}
+                    style={[
+                      styles.downloadButton,
+                      { backgroundColor: colors.accentStrong },
+                      downloading && styles.disabledButton,
+                    ]}
                   >
-                    Refresh link
-                  </Text>
-                </TouchableOpacity>
+                    {downloading ? (
+                      <ActivityIndicator size="small" color="#fff" />
+                    ) : (
+                      <Ionicons name="download-outline" size={18} color="#fff" />
+                    )}
+                    <Text style={styles.downloadText}>
+                      {downloading ? "Downloading..." : "Download"}
+                    </Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    accessibilityLabel="Refresh secure video link"
+                    onPress={loadPlaybackUrl}
+                    style={[
+                      styles.refreshButton,
+                      { borderColor: colors.border },
+                    ]}
+                  >
+                    <Ionicons
+                      name="refresh"
+                      size={18}
+                      color={colors.accent}
+                    />
+                    <Text
+                      style={[styles.refreshText, { color: colors.accent }]}
+                    >
+                      Refresh link
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
+              {downloadError ? (
+                <Text
+                  accessibilityLiveRegion="polite"
+                  style={[styles.downloadError, { color: colors.danger }]}
+                >
+                  {downloadError}
+                </Text>
+              ) : null}
             </>
           )}
         </View>
@@ -252,7 +314,32 @@ const styles = StyleSheet.create({
   expiry: {
     fontSize: 12,
   },
+  playbackActions: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    alignItems: "center",
+    gap: 10,
+  },
+  downloadButton: {
+    minHeight: 40,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 7,
+    borderRadius: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
+  },
+  disabledButton: {
+    opacity: 0.65,
+  },
+  downloadText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "700",
+  },
   refreshButton: {
+    minHeight: 40,
     flexDirection: "row",
     alignItems: "center",
     gap: 7,
@@ -264,5 +351,10 @@ const styles = StyleSheet.create({
   refreshText: {
     fontSize: 13,
     fontWeight: "700",
+  },
+  downloadError: {
+    marginTop: 10,
+    textAlign: "right",
+    fontSize: 13,
   },
 });
