@@ -6,6 +6,7 @@ import {
   KeyboardTypeOptions,
   Modal,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -82,6 +83,7 @@ export default function FormModal({
         behavior={Platform.OS === "ios" ? "padding" : "height"}
         style={m.backdrop}
       >
+        <Pressable style={StyleSheet.absoluteFill} onPress={onClose} />
         <View style={m.card}>
           <View style={m.header}>
             <View style={{ flex: 1 }}>
@@ -123,7 +125,7 @@ export default function FormModal({
                         ? "none"
                         : "sentences")
                     }
-                    autoCorrect={!f.secure}
+                    autoCorrect={!f.secure && f.keyboardType !== "email-address"}
                     multiline={f.multiline}
                   />
                 </View>
