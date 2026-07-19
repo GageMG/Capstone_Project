@@ -7,12 +7,13 @@ import {
   Dimensions,
   FlatList,
   Image,
+  Modal,
   Platform,
+  Pressable,
   SafeAreaView,
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -35,28 +36,50 @@ type EventOption = { event_id: number; name: string };
 export default function UploadScreen() {
   const { colors: c } = useTheme();
   const { loggedIn } = useAuth();
-  const { eventId, setCurrentEvent, clearCurrentEvent } = useCurrentEvent();
+  const { eventId, eventName, setCurrentEvent } = useCurrentEvent();
   const s = useMemo(() => makeStyles(c), [c]);
   const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [uploading, setUploading] = useState(false);
   const [done, setDone] = useState(false);
   const [securityConfirmed, setSecurityConfirmed] = useState(false);
-  const [manualId, setManualId] = useState(eventId ? String(eventId) : "");
   const [events, setEvents] = useState<EventOption[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const [eventsAttempt, setEventsAttempt] = useState(0);
+  const [eventMenuOpen, setEventMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!loggedIn) {
       setEvents([]);
+      setEventsError(null);
       return;
     }
-    apiFetch("/events/mine")
-      .then((res) => setEvents(Array.isArray(res) ? res : res.events ?? []))
-      .catch(() => {});
-  }, [loggedIn]);
 
-  useEffect(() => {
-    if (eventId === null) setManualId("");
-  }, [eventId]);
+    const controller = new AbortController();
+    setEventsLoading(true);
+    setEventsError(null);
+
+    apiFetch("/users/me/events", undefined, "GET", controller.signal)
+      .then((res) => {
+        setEvents(Array.isArray(res) ? res : res.events ?? []);
+      })
+      .catch((error: unknown) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        setEventsError(
+          error instanceof Error ? error.message : "Could not load events."
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setEventsLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [loggedIn, eventsAttempt]);
+
+  const selectedEventName =
+    events.find((event) => event.event_id === eventId)?.name ??
+    eventName ??
+    null;
 
   const isValidImage = (uri: string) => {
     const lower = uri.toLowerCase();
@@ -217,42 +240,149 @@ export default function UploadScreen() {
 
       <View style={s.eventBox}>
         <Text style={s.eventLabel}>UPLOAD TO EVENT</Text>
-        {events.length > 0 ? (
-          <View style={s.chipRow}>
-            {events.map((ev) => (
-              <TouchableOpacity
-                key={ev.event_id}
-                style={[s.chip, eventId === ev.event_id && s.chipSelected]}
-                onPress={() => setCurrentEvent(ev.event_id, ev.name)}
-                activeOpacity={0.8}
-              >
-                <Text
-                  style={[
-                    s.chipText,
-                    eventId === ev.event_id && s.chipTextSelected,
-                  ]}
-                >
-                  {ev.name}
-                </Text>
-              </TouchableOpacity>
-            ))}
+        <TouchableOpacity
+          accessibilityLabel="Select an event"
+          accessibilityRole="button"
+          activeOpacity={0.8}
+          disabled={eventsLoading || Boolean(eventsError)}
+          onPress={() => setEventMenuOpen(true)}
+          style={[
+            s.eventSelect,
+            eventId !== null && s.eventSelectChosen,
+            (eventsLoading || Boolean(eventsError)) && s.eventSelectDisabled,
+          ]}
+        >
+          <View style={s.eventSelectText}>
+            <Text style={s.eventSelectTitle} numberOfLines={1}>
+              {eventsLoading
+                ? "Loading events..."
+                : selectedEventName ?? "Select an event"}
+            </Text>
+            {!eventsLoading && (
+              <Text style={s.eventSelectHint} numberOfLines={1}>
+                {selectedEventName
+                  ? `Event ${eventId}`
+                  : events.length > 0
+                    ? `${events.length} available`
+                    : "No events available"}
+              </Text>
+            )}
           </View>
-        ) : (
-          <TextInput
-            style={s.eventInput}
-            placeholder="Event ID"
-            placeholderTextColor={c.textMuted}
-            keyboardType="number-pad"
-            value={manualId}
-            onChangeText={(t) => {
-              setManualId(t);
-              const n = Number(t);
-              if (Number.isInteger(n) && n > 0) setCurrentEvent(n);
-              else clearCurrentEvent();
-            }}
-          />
+          {eventsLoading ? (
+            <ActivityIndicator size="small" color={c.accent} />
+          ) : (
+            <Ionicons name="chevron-down" size={20} color={c.textMuted} />
+          )}
+        </TouchableOpacity>
+        {eventsError && (
+          <View style={s.eventErrorRow}>
+            <Text style={s.eventErrorText}>{eventsError}</Text>
+            <TouchableOpacity
+              onPress={() => setEventsAttempt((attempt) => attempt + 1)}
+            >
+              <Text style={s.eventRetryText}>Try again</Text>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
+
+      <Modal
+        visible={eventMenuOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEventMenuOpen(false)}
+      >
+        <View style={s.eventMenuBackdrop}>
+          <Pressable
+            accessibilityLabel="Close event selector"
+            style={StyleSheet.absoluteFill}
+            onPress={() => setEventMenuOpen(false)}
+          />
+          <View style={s.eventMenu}>
+            <View style={s.eventMenuHeader}>
+              <View>
+                <Text style={s.eventMenuEyebrow}>UPLOAD TO</Text>
+                <Text style={s.eventMenuTitle}>Select an event</Text>
+              </View>
+              <TouchableOpacity
+                accessibilityLabel="Close event selector"
+                onPress={() => setEventMenuOpen(false)}
+                style={s.eventMenuClose}
+              >
+                <Ionicons name="close" size={20} color={c.textBright} />
+              </TouchableOpacity>
+            </View>
+            <FlatList
+              data={events}
+              keyExtractor={(item) => String(item.event_id)}
+              style={s.eventMenuList}
+              contentContainerStyle={s.eventMenuListContent}
+              ListEmptyComponent={
+                <View style={s.eventMenuEmpty}>
+                  <Ionicons
+                    name="calendar-outline"
+                    size={32}
+                    color={c.textFaint}
+                  />
+                  <Text style={s.eventMenuEmptyText}>
+                    No events are available for this account.
+                  </Text>
+                </View>
+              }
+              renderItem={({ item }) => {
+                const selected = item.event_id === eventId;
+                return (
+                  <TouchableOpacity
+                    activeOpacity={0.8}
+                    onPress={() => {
+                      setCurrentEvent(item.event_id, item.name);
+                      setEventMenuOpen(false);
+                    }}
+                    style={[
+                      s.eventOption,
+                      selected && s.eventOptionSelected,
+                    ]}
+                  >
+                    <View style={s.eventOptionIcon}>
+                      <Ionicons
+                        name="calendar-outline"
+                        size={20}
+                        color={selected ? "#fff" : c.accent}
+                      />
+                    </View>
+                    <View style={s.eventOptionText}>
+                      <Text
+                        numberOfLines={1}
+                        style={[
+                          s.eventOptionName,
+                          selected && s.eventOptionNameSelected,
+                        ]}
+                      >
+                        {item.name}
+                      </Text>
+                      <Text
+                        style={[
+                          s.eventOptionId,
+                          selected && s.eventOptionIdSelected,
+                        ]}
+                      >
+                        Event {item.event_id}
+                      </Text>
+                    </View>
+                    {selected && (
+                      <Ionicons
+                        name="checkmark-circle"
+                        size={22}
+                        color="#fff"
+                      />
+                    )}
+                  </TouchableOpacity>
+                );
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
 
       <View style={s.securityBox}>
         <Ionicons name="shield-checkmark-outline" size={20} color={c.successText} />
@@ -430,40 +560,159 @@ const makeStyles = (c: ThemeColors) =>
       letterSpacing: 2.5,
       marginBottom: 8,
     },
-    chipRow: {
+    eventSelect: {
+      minHeight: 58,
       flexDirection: "row",
-      flexWrap: "wrap",
-      gap: 8,
-    },
-    chip: {
+      alignItems: "center",
+      gap: 12,
+      borderRadius: 14,
+      borderWidth: 1,
+      borderColor: c.border,
+      backgroundColor: c.surface,
       paddingHorizontal: 14,
-      paddingVertical: 8,
-      borderRadius: 20,
+      paddingVertical: 10,
+    },
+    eventSelectChosen: {
+      borderColor: c.accent,
+    },
+    eventSelectDisabled: {
+      opacity: 0.7,
+    },
+    eventSelectText: {
+      flex: 1,
+    },
+    eventSelectTitle: {
+      fontSize: 15,
+      fontWeight: "700",
+      color: c.textPrimary,
+    },
+    eventSelectHint: {
+      marginTop: 2,
+      fontSize: 11,
+      color: c.textMuted,
+    },
+    eventErrorRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      gap: 12,
+      marginTop: 7,
+    },
+    eventErrorText: {
+      flex: 1,
+      fontSize: 12,
+      color: c.danger,
+    },
+    eventRetryText: {
+      fontSize: 12,
+      fontWeight: "700",
+      color: c.accent,
+    },
+    eventMenuBackdrop: {
+      flex: 1,
+      justifyContent: "center",
+      backgroundColor: "rgba(5,8,16,0.72)",
+      paddingHorizontal: 20,
+    },
+    eventMenu: {
+      width: "100%",
+      maxWidth: 520,
+      maxHeight: "72%",
+      alignSelf: "center",
       backgroundColor: c.surface,
       borderWidth: 1,
       borderColor: c.border,
+      borderRadius: 20,
+      overflow: "hidden",
     },
-    chipSelected: {
-      backgroundColor: c.accentStrong,
-      borderColor: c.accentStrong,
+    eventMenuHeader: {
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "space-between",
+      padding: 18,
+      borderBottomWidth: 1,
+      borderBottomColor: c.border,
     },
-    chipText: {
+    eventMenuEyebrow: {
+      fontSize: 9,
+      fontWeight: "700",
+      color: c.accent,
+      letterSpacing: 2,
+      marginBottom: 3,
+    },
+    eventMenuTitle: {
+      fontSize: 20,
+      fontWeight: "800",
+      color: c.textBright,
+    },
+    eventMenuClose: {
+      width: 36,
+      height: 36,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.bg,
+    },
+    eventMenuList: {
+      flexGrow: 0,
+    },
+    eventMenuListContent: {
+      padding: 12,
+      gap: 8,
+    },
+    eventMenuEmpty: {
+      minHeight: 160,
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      paddingHorizontal: 24,
+    },
+    eventMenuEmptyText: {
+      color: c.textMuted,
       fontSize: 13,
-      fontWeight: "600",
-      color: c.textPrimary,
+      textAlign: "center",
     },
-    chipTextSelected: {
+    eventOption: {
+      minHeight: 64,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 12,
+      padding: 12,
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 14,
+      backgroundColor: c.bg,
+    },
+    eventOptionSelected: {
+      borderColor: c.accentStrong,
+      backgroundColor: c.accentStrong,
+    },
+    eventOptionIcon: {
+      width: 38,
+      height: 38,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(59,130,246,0.12)",
+    },
+    eventOptionText: {
+      flex: 1,
+    },
+    eventOptionName: {
+      color: c.textPrimary,
+      fontSize: 14,
+      fontWeight: "700",
+    },
+    eventOptionNameSelected: {
       color: "#fff",
     },
-    eventInput: {
-      height: 46,
-      borderRadius: 12,
-      borderWidth: 1.5,
-      borderColor: c.border,
-      backgroundColor: c.surface,
-      paddingHorizontal: 14,
-      fontSize: 15,
-      color: c.textPrimary,
+    eventOptionId: {
+      color: c.textMuted,
+      fontSize: 11,
+      marginTop: 2,
+    },
+    eventOptionIdSelected: {
+      color: "rgba(255,255,255,0.78)",
     },
 
     securityBox: {
