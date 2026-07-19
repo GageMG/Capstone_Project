@@ -17,7 +17,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import { API_URL, apiFetch } from "@/lib/api";
+import { apiFetch, apiUpload } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { useCurrentEvent } from "@/lib/CurrentEventContext";
 import { ThemeColors } from "@/theme/colors";
@@ -27,11 +27,18 @@ const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const THUMB = (SCREEN_WIDTH - 56) / 3;
 
 const MAX_PHOTOS = 20;
-const QR_TOKEN = "QR_TOKEN_HERE";
-const GUEST_ID = 0;
 
-type PickedPhoto = { id: string; uri: string };
+type PickedPhoto = {
+  id: string;
+  uri: string;
+  name: string;
+  mimeType: "image/jpeg" | "image/png";
+};
 type EventOption = { event_id: number; name: string };
+type UploadResponse = {
+  uploaded: number;
+  results?: Array<{ status?: string; error?: string }>;
+};
 
 export default function UploadScreen() {
   const { colors: c } = useTheme();
@@ -81,24 +88,17 @@ export default function UploadScreen() {
     eventName ??
     null;
 
-  const isValidImage = (uri: string) => {
-    const lower = uri.toLowerCase();
-    return (
-      lower.endsWith(".jpg") ||
-      lower.endsWith(".jpeg") ||
-      lower.endsWith(".png") ||
-      lower.includes("image")
-    );
-  };
+  const isValidImage = (photo: PickedPhoto) =>
+    photo.mimeType === "image/jpeg" || photo.mimeType === "image/png";
 
   const validateUpload = () => {
-    if (!eventId) {
-      Alert.alert("No Event Selected", "Choose which event these photos belong to.");
+    if (!loggedIn) {
+      Alert.alert("Login Required", "Log in before uploading photos.");
       return false;
     }
 
-    if (!QR_TOKEN || QR_TOKEN === "QR_TOKEN_HERE" || !GUEST_ID) {
-      Alert.alert("Security Error", "Missing valid QR event token or guest ID.");
+    if (!eventId) {
+      Alert.alert("No Event Selected", "Choose which event these photos belong to.");
       return false;
     }
 
@@ -112,7 +112,7 @@ export default function UploadScreen() {
       return false;
     }
 
-    const invalidPhoto = photos.find((photo) => !isValidImage(photo.uri));
+    const invalidPhoto = photos.find((photo) => !isValidImage(photo));
     if (invalidPhoto) {
       Alert.alert("Invalid File", "Only JPG, JPEG, and PNG image files are allowed.");
       return false;
@@ -144,10 +144,33 @@ export default function UploadScreen() {
     });
 
     if (!result.canceled) {
-      const picked: PickedPhoto[] = result.assets.map((a, i) => ({
-        id: `${Date.now()}-${i}`,
-        uri: a.uri,
-      }));
+      const picked: PickedPhoto[] = result.assets
+        .filter(
+          (asset) =>
+            asset.mimeType === "image/jpeg" ||
+            asset.mimeType === "image/png" ||
+            /\.(jpe?g|png)$/i.test(asset.fileName ?? asset.uri)
+        )
+        .map((asset, index) => {
+          const png =
+            asset.mimeType === "image/png" ||
+            /\.png$/i.test(asset.fileName ?? asset.uri);
+          return {
+            id: `${Date.now()}-${index}`,
+            uri: asset.uri,
+            name:
+              asset.fileName ??
+              `photo_${Date.now()}_${index}.${png ? "png" : "jpg"}`,
+            mimeType: png ? "image/png" : "image/jpeg",
+          };
+        });
+
+      if (picked.length !== result.assets.length) {
+        Alert.alert(
+          "Unsupported Files",
+          "Only JPG, JPEG, and PNG images were added."
+        );
+      }
 
       const combined = [...photos, ...picked].slice(0, MAX_PHOTOS);
 
@@ -177,37 +200,30 @@ export default function UploadScreen() {
       const formData = new FormData();
 
       formData.append("eventID", String(eventId));
-      formData.append("qrToken", QR_TOKEN);
-      formData.append("guestID", String(GUEST_ID));
 
-      photos.forEach((photo, index) => {
+      photos.forEach((photo) => {
         formData.append("files", {
           uri: photo.uri,
-          name: `photo_${index}.jpg`,
-          type: "image/jpeg",
+          name: photo.name,
+          type: photo.mimeType,
         } as any);
       });
 
-      const response = await fetch(`${API_URL}/upload/guest`, {
-        method: "POST",
-        body: formData,
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(typeof err.detail === "string" ? err.detail : "Upload failed");
+      const result = await apiUpload<UploadResponse>("/upload/user", formData);
+      if (result.uploaded < 1) {
+        const reason = result.results?.find((item) => item.error)?.error;
+        throw new Error(reason ?? "The server did not accept any photos.");
       }
-
-      const result = await response.json();
-      console.log(`Uploaded ${result.uploaded} photos`);
 
       setDone(true);
       setPhotos([]);
       setSecurityConfirmed(false);
 
       Alert.alert(
-        "Upload Submitted",
-        "Photos were uploaded and marked for admin review."
+        "Upload Complete",
+        `${result.uploaded} photo${result.uploaded !== 1 ? "s" : ""} uploaded to ${
+          selectedEventName ?? `event ${eventId}`
+        }.`
       );
     } catch (error: any) {
       Alert.alert("Upload Failed", error.message ?? "Please try again.");
@@ -389,7 +405,8 @@ export default function UploadScreen() {
         <View style={{ flex: 1 }}>
           <Text style={s.securityTitle}>Security Check</Text>
           <Text style={s.securityText}>
-            Only image files are allowed. Uploads use the event QR token and are submitted for admin review.
+            Only JPG and PNG files are allowed. Uploads are authenticated and
+            added to the selected event.
           </Text>
         </View>
       </View>
