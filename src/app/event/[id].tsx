@@ -48,9 +48,27 @@ type UploadedVideo = {
   durationSeconds: number | null;
 };
 
+type GeneratedVideo = {
+  id: string;
+  title: string;
+  durationSeconds: number | null;
+};
+
 type EventMediaResponse = {
   photos: MediaItem[];
   videos: MediaItem[];
+};
+
+type GeneratedVideoRecord = {
+  gen_vid_id: number;
+  title: string | null;
+  file_name: string | null;
+  status: string;
+  duration_seconds: number | null;
+};
+
+type GeneratedVideosResponse = {
+  videos: GeneratedVideoRecord[];
 };
 
 function formatDuration(seconds: number | null) {
@@ -184,7 +202,10 @@ export default function EventDetailScreen() {
   const [event, setEvent] = useState<EventInfo | null>(null);
   const [photos, setPhotos] = useState<LightboxPhoto[]>([]);
   const [videos, setVideos] = useState<UploadedVideo[]>([]);
-  const [mediaTab, setMediaTab] = useState<"photos" | "videos">("photos");
+  const [generatedVideos, setGeneratedVideos] = useState<GeneratedVideo[]>([]);
+  const [mediaTab, setMediaTab] = useState<
+    "photos" | "videos" | "generated"
+  >("photos");
   const [selectedVideo, setSelectedVideo] = useState<UploadedVideo | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -199,9 +220,15 @@ export default function EventDetailScreen() {
 
     (async () => {
       try {
-        const [eventRes, mediaRes] = await Promise.all([
+        const [eventRes, mediaRes, generatedRes] = await Promise.all([
           apiFetch(`/events/${id}`, undefined, "GET", controller.signal),
           apiFetch(`/events/${id}/media?dataType=both`, undefined, "GET", controller.signal),
+          apiFetch<GeneratedVideosResponse>(
+            `/events/${id}/generated-videos`,
+            undefined,
+            "GET",
+            controller.signal
+          ),
         ]);
         setEvent(eventRes.event);
         setPhotos(
@@ -221,8 +248,30 @@ export default function EventDetailScreen() {
             durationSeconds: video.duration_seconds ?? null,
           }));
         setVideos(loadedVideos);
-        if ((mediaRes.photos ?? []).length === 0 && loadedVideos.length > 0) {
-          setMediaTab("videos");
+        const loadedGeneratedVideos = (generatedRes.videos ?? [])
+          .filter(
+            (video) =>
+              video.status === "completed" &&
+              Number.isInteger(video.gen_vid_id) &&
+              video.gen_vid_id > 0
+          )
+          .map((video) => ({
+            id: String(video.gen_vid_id),
+            title:
+              video.title ||
+              video.file_name ||
+              `Generated video ${video.gen_vid_id}`,
+            durationSeconds: video.duration_seconds ?? null,
+          }));
+        setGeneratedVideos(loadedGeneratedVideos);
+        if ((mediaRes.photos ?? []).length === 0) {
+          setMediaTab(
+            loadedVideos.length > 0
+              ? "videos"
+              : loadedGeneratedVideos.length > 0
+                ? "generated"
+                : "photos"
+          );
         }
         setLoading(false);
       } catch (err: any) {
@@ -284,6 +333,9 @@ export default function EventDetailScreen() {
           <Text style={s.counts}>
             {photos.length} photo{photos.length !== 1 ? "s" : ""}
             {videos.length > 0 ? ` · ${videos.length} video${videos.length !== 1 ? "s" : ""}` : ""}
+            {generatedVideos.length > 0
+              ? ` · ${generatedVideos.length} generated`
+              : ""}
           </Text>
 
           <View style={s.tabs}>
@@ -329,6 +381,34 @@ export default function EventDetailScreen() {
                 Videos ({videos.length})
               </Text>
             </TouchableOpacity>
+            {generatedVideos.length > 0 && (
+              <TouchableOpacity
+                onPress={() => setMediaTab("generated")}
+                style={[
+                  s.tab,
+                  mediaTab === "generated" && {
+                    backgroundColor: c.accentStrong,
+                  },
+                ]}
+              >
+                <Ionicons
+                  name="sparkles-outline"
+                  size={18}
+                  color={mediaTab === "generated" ? "#fff" : c.textMuted}
+                />
+                <Text
+                  style={[
+                    s.tabText,
+                    {
+                      color:
+                        mediaTab === "generated" ? "#fff" : c.textMuted,
+                    },
+                  ]}
+                >
+                  Generated ({generatedVideos.length})
+                </Text>
+              </TouchableOpacity>
+            )}
           </View>
 
           {mediaTab === "photos" ? (
@@ -359,7 +439,7 @@ export default function EventDetailScreen() {
                 )}
               />
             )
-          ) : (
+          ) : mediaTab === "videos" ? (
             <FlatList
               key="videos"
               data={videos}
@@ -394,6 +474,47 @@ export default function EventDetailScreen() {
                     ]}
                   >
                     <Ionicons name="play" size={24} color="#fff" />
+                  </View>
+                  <View style={s.videoInfo}>
+                    <Text numberOfLines={1} style={s.videoTitle}>
+                      {item.title}
+                    </Text>
+                    <Text style={s.videoMeta}>
+                      {formatDuration(item.durationSeconds)}
+                    </Text>
+                  </View>
+                  <Ionicons
+                    name="chevron-forward"
+                    size={20}
+                    color={c.textFaint}
+                  />
+                </TouchableOpacity>
+              )}
+            />
+          ) : (
+            <FlatList
+              key="generated"
+              data={generatedVideos}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={s.videoList}
+              renderItem={({ item }) => (
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  onPress={() =>
+                    router.push(`/events/${id}/videos/${item.id}`)
+                  }
+                  style={[
+                    s.videoRow,
+                    { backgroundColor: c.surface, borderColor: c.border },
+                  ]}
+                >
+                  <View
+                    style={[
+                      s.videoIcon,
+                      { backgroundColor: c.accentStrong },
+                    ]}
+                  >
+                    <Ionicons name="sparkles" size={24} color="#fff" />
                   </View>
                   <View style={s.videoInfo}>
                     <Text numberOfLines={1} style={s.videoTitle}>
@@ -508,6 +629,8 @@ const makeStyles = (c: ThemeColors) =>
     },
     tabs: {
       flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
       alignSelf: "center",
       gap: 8,
       paddingHorizontal: 16,

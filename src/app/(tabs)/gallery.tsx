@@ -271,7 +271,12 @@ export default function GalleryScreen() {
                 <GalleryCard
                   key={gallery.id}
                   gallery={gallery}
-                  onPress={() => router.push(`/event/${gallery.id}`)}
+                  onPress={() =>
+                    router.push({
+                      pathname: "/event/[id]",
+                      params: { id: gallery.id },
+                    })
+                  }
                 />
               ))}
             </View>

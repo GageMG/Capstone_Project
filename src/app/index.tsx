@@ -57,11 +57,6 @@ export default function WelcomeScreen() {
   const [loggingIn, setLoggingIn] = useState(false);
 
   const handleLogin = async () => {
-    if (loggedIn) {
-      router.replace("/gallery");
-      return;
-    }
-
     const login = username.trim();
     if (!login || !password) {
       Alert.alert("Missing Info", "Enter your username and password.");
@@ -74,7 +69,8 @@ export default function WelcomeScreen() {
         ...(login.includes("@") ? { email: login } : { user_name: login }),
         pwd: password,
       });
-      signIn(access_token);
+      await signIn(access_token);
+      setPassword("");
       router.replace("/gallery");
     } catch (error: any) {
       Alert.alert("Login Failed", error.message ?? "Please try again.");
@@ -202,7 +198,7 @@ export default function WelcomeScreen() {
             disabled={loggingIn}
           >
             <Text style={styles.loginButtonText}>
-              {loggingIn ? "LOGGING IN…" : loggedIn ? "CONTINUE" : "LOG IN"}
+              {loggingIn ? "LOGGING IN…" : "LOG IN"}
             </Text>
             {!loggingIn && <Text style={styles.loginArrow}>→</Text>}
           </TouchableOpacity>
