@@ -435,8 +435,8 @@ export default function SettingsScreen() {
         {
           text: "Log Out",
           style: "destructive",
-          onPress: () => {
-            signOut();
+          onPress: async () => {
+            await signOut();
             router.replace("/");
           },
         },

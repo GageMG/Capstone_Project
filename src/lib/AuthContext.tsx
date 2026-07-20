@@ -6,6 +6,7 @@ import { onUnauthorized, setToken } from "./api";
 const TOKEN_KEY = "auth_token";
 const SIGNED_OUT = "__signed_out__";
 const web = () => (globalThis as any).localStorage;
+let pendingStorageWrite = Promise.resolve();
 
 const storage = {
   async get(): Promise<string | null> {
@@ -17,21 +18,24 @@ const storage = {
       return null;
     }
   },
-  async set(value: string) {
-    try {
-      if (Platform.OS === "web") web()?.setItem(TOKEN_KEY, value);
-      else await SecureStore.setItemAsync(TOKEN_KEY, value);
-    } catch (e) {
-      console.warn("Token write failed:", e);
-    }
+  set(value: string): Promise<void> {
+    pendingStorageWrite = pendingStorageWrite.then(async () => {
+      try {
+        if (Platform.OS === "web") web()?.setItem(TOKEN_KEY, value);
+        else await SecureStore.setItemAsync(TOKEN_KEY, value);
+      } catch (e) {
+        console.warn("Token write failed:", e);
+      }
+    });
+    return pendingStorageWrite;
   },
 };
 
 type AuthContextValue = {
   ready: boolean;
   loggedIn: boolean;
-  signIn: (token: string) => void;
-  signOut: () => void;
+  signIn: (token: string) => Promise<void>;
+  signOut: () => Promise<void>;
 };
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -42,8 +46,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     onUnauthorized(() => {
+      setToken("");
       setLoggedIn(false);
-      storage.set(SIGNED_OUT);
+      void storage.set(SIGNED_OUT);
     });
 
     (async () => {
@@ -60,15 +65,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     () => ({
       ready,
       loggedIn,
-      signIn: (t) => {
+      signIn: async (t) => {
+        await storage.set(t);
         setToken(t);
         setLoggedIn(true);
-        storage.set(t);
       },
-      signOut: () => {
+      signOut: async () => {
         setToken("");
         setLoggedIn(false);
-        storage.set(SIGNED_OUT);
+        await storage.set(SIGNED_OUT);
       },
     }),
     [ready, loggedIn]

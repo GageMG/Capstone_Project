@@ -28,8 +28,8 @@ export default function AccountButton() {
 
   const top = insets.top + 8;
 
-  const signOut = () => {
-    authSignOut();
+  const signOut = async () => {
+    await authSignOut();
     setOpen(false);
     router.replace("/");
   };
