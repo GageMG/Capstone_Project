@@ -1,4 +1,5 @@
 import { Ionicons } from "@expo/vector-icons";
+import { router } from "expo-router";
 import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
@@ -30,6 +31,11 @@ type UploadedVideo = {
   title: string;
   durationSeconds: number | null;
 };
+type GeneratedVideo = {
+  id: string;
+  title: string;
+  durationSeconds: number | null;
+};
 
 type Gallery = {
   id: string;
@@ -41,6 +47,7 @@ type Gallery = {
   accentColor: string;
   photos: Photo[];
   videos: UploadedVideo[];
+  generatedVideos: GeneratedVideo[];
 };
 
 type EventRecord = {
@@ -70,6 +77,18 @@ type EventMediaResponse = {
   videos: MediaRecord[];
 };
 
+type GeneratedVideoRecord = {
+  gen_vid_id: number;
+  title: string | null;
+  file_name: string | null;
+  status: string;
+  duration_seconds: number | null;
+};
+
+type GeneratedVideosResponse = {
+  videos: GeneratedVideoRecord[];
+};
+
 const GALLERY_COLORS = [
   { cover: "#1A2F5A", accent: "#3B82F6" },
   { cover: "#312E81", accent: "#8B5CF6" },
@@ -88,9 +107,14 @@ function formatEventDate(value: string) {
 }
 
 async function loadGallery(event: EventRecord, index: number): Promise<Gallery> {
-  const media = await apiFetch<EventMediaResponse>(
-    `/events/${event.event_id}/media?dataType=both`
-  );
+  const [media, generated] = await Promise.all([
+    apiFetch<EventMediaResponse>(
+      `/events/${event.event_id}/media?dataType=both`
+    ),
+    apiFetch<GeneratedVideosResponse>(
+      `/events/${event.event_id}/generated-videos`
+    ),
+  ]);
   const palette = GALLERY_COLORS[index % GALLERY_COLORS.length];
   const photos = media.photos
     .filter(
@@ -115,6 +139,21 @@ async function loadGallery(event: EventRecord, index: number): Promise<Gallery> 
         `Uploaded video ${video.id}`,
       durationSeconds: video.duration_seconds ?? null,
     }));
+  const generatedVideos = (generated.videos ?? [])
+    .filter(
+      (video) =>
+        video.status === "completed" &&
+        Number.isInteger(video.gen_vid_id) &&
+        video.gen_vid_id > 0
+    )
+    .map((video) => ({
+      id: String(video.gen_vid_id),
+      title:
+        video.title ||
+        video.file_name ||
+        `Generated video ${video.gen_vid_id}`,
+      durationSeconds: video.duration_seconds ?? null,
+    }));
 
   return {
     id: String(event.event_id),
@@ -126,6 +165,7 @@ async function loadGallery(event: EventRecord, index: number): Promise<Gallery> 
     accentColor: palette.accent,
     photos,
     videos,
+    generatedVideos,
   };
 }
 
@@ -424,8 +464,14 @@ function GalleryDetail({
   const [selectedVideo, setSelectedVideo] = useState<UploadedVideo | null>(
     null
   );
-  const [mediaTab, setMediaTab] = useState<"photos" | "videos">(
-    gallery.photos.length > 0 ? "photos" : "videos"
+  const [mediaTab, setMediaTab] = useState<
+    "photos" | "videos" | "generated"
+  >(
+    gallery.photos.length > 0
+      ? "photos"
+      : gallery.videos.length > 0
+        ? "videos"
+        : "generated"
   );
   const numCols = 3;
   const cellSize = (SCREEN_WIDTH - 4) / numCols;
@@ -444,6 +490,9 @@ function GalleryDetail({
               <Text style={gd.meta}>
                 {gallery.date} · {gallery.photoCount} photos ·{" "}
                 {gallery.videoCount} videos
+                {gallery.generatedVideos.length > 0
+                  ? ` · ${gallery.generatedVideos.length} generated`
+                  : ""}
               </Text>
             </View>
             <View
@@ -499,6 +548,34 @@ function GalleryDetail({
               Videos ({gallery.videoCount})
             </Text>
           </TouchableOpacity>
+          {gallery.generatedVideos.length > 0 && (
+            <TouchableOpacity
+              onPress={() => setMediaTab("generated")}
+              style={[
+                gd.tab,
+                mediaTab === "generated" && {
+                  backgroundColor: gallery.accentColor,
+                },
+              ]}
+            >
+              <Ionicons
+                name="sparkles-outline"
+                size={18}
+                color={mediaTab === "generated" ? "#fff" : c.textMuted}
+              />
+              <Text
+                style={[
+                  gd.tabText,
+                  {
+                    color:
+                      mediaTab === "generated" ? "#fff" : c.textMuted,
+                  },
+                ]}
+              >
+                Generated ({gallery.generatedVideos.length})
+              </Text>
+            </TouchableOpacity>
+          )}
         </View>
         {mediaTab === "photos" ? (
           <FlatList
@@ -537,7 +614,7 @@ function GalleryDetail({
               </TouchableOpacity>
             )}
           />
-        ) : (
+        ) : mediaTab === "videos" ? (
           <FlatList
             key="videos"
             data={gallery.videos}
@@ -574,6 +651,53 @@ function GalleryDetail({
                   ]}
                 >
                   <Ionicons name="play" size={24} color="#fff" />
+                </View>
+                <View style={gd.videoInfo}>
+                  <Text
+                    numberOfLines={1}
+                    style={[gd.videoTitle, { color: c.textPrimary }]}
+                  >
+                    {item.title}
+                  </Text>
+                  <Text style={[gd.videoMeta, { color: c.textMuted }]}>
+                    {formatDuration(item.durationSeconds)}
+                  </Text>
+                </View>
+                <Ionicons
+                  name="chevron-forward"
+                  size={20}
+                  color={c.textFaint}
+                />
+              </TouchableOpacity>
+            )}
+          />
+        ) : (
+          <FlatList
+            key="generated"
+            data={gallery.generatedVideos}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={gd.videoList}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                activeOpacity={0.85}
+                onPress={() => {
+                  onClose();
+                  router.push(
+                    `/events/${gallery.id}/videos/${item.id}`
+                  );
+                }}
+                style={[
+                  gd.videoRow,
+                  { backgroundColor: c.surface, borderColor: c.border },
+                ]}
+              >
+                <View
+                  style={[
+                    gd.videoIcon,
+                    { backgroundColor: gallery.accentColor },
+                  ]}
+                >
+                  <Ionicons name="sparkles" size={24} color="#fff" />
                 </View>
                 <View style={gd.videoInfo}>
                   <Text
@@ -651,6 +775,8 @@ const makeDetailStyles = (c: ThemeColors) =>
     },
     tabs: {
       flexDirection: "row",
+      flexWrap: "wrap",
+      justifyContent: "center",
       alignSelf: "center",
       gap: 8,
       paddingHorizontal: 16,
