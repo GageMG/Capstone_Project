@@ -9,10 +9,11 @@ from uuid import uuid4
 
 class genQR():
     def __init__(self, db, log, blob, path = None):
-        self.baseUrl = (path    
+        self.baseUrl = (
+            path
             or os.getenv("QR_BASE_URL")
-            or "http://localhost:8000/upload/qr/check?"
-        ).rstrip("/")
+            or "http://localhost:8081/guest-upload"
+        ).rstrip("/?")
         self.log = log
         self.blob = blob
         self.db = db

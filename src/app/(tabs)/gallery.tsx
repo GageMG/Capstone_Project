@@ -282,6 +282,24 @@ export default function GalleryScreen() {
             </View>
           </ScrollView>
         )}
+        <View style={styles.floatingActions}>
+          <TouchableOpacity
+            style={[styles.floatingButton, styles.chatButton]}
+            activeOpacity={0.86}
+            onPress={() => router.push("/chatbot")}
+            accessibilityLabel="Open video assistant"
+          >
+            <Ionicons name="chatbubble-ellipses" size={22} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.floatingButton}
+            activeOpacity={0.86}
+            onPress={() => router.push("/upload")}
+            accessibilityLabel="Upload photos"
+          >
+            <Ionicons name="add" size={29} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
     </SafeAreaView>
   );
@@ -338,4 +356,33 @@ const makeStyles = (c: ThemeColors) =>
     },
     grid: { paddingHorizontal: 20, paddingBottom: 24 },
     row: { flexDirection: "row", flexWrap: "wrap", gap: 12 },
+    floatingActions: {
+      position: "absolute",
+      right: 22,
+      bottom: 22,
+      alignItems: "center",
+      gap: 11,
+    },
+    floatingButton: {
+      width: 58,
+      height: 58,
+      borderRadius: 19,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.accentStrong,
+      borderWidth: 1,
+      borderColor: c.accent,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 7 },
+      shadowOpacity: 0.35,
+      shadowRadius: 10,
+      elevation: 9,
+    },
+    chatButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: "#7C3AED",
+      borderColor: "#8B5CF6",
+    },
   });

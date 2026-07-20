@@ -65,11 +65,11 @@ export default function WelcomeScreen() {
 
     setLoggingIn(true);
     try {
-      const { access_token } = await apiFetch("/users/login", {
+      const { access_token, user } = await apiFetch("/users/login", {
         ...(login.includes("@") ? { email: login } : { user_name: login }),
         pwd: password,
       });
-      await signIn(access_token);
+      await signIn(access_token, user);
       setPassword("");
       router.replace("/gallery");
     } catch (error: any) {
@@ -97,9 +97,29 @@ export default function WelcomeScreen() {
     }
   };
 
+  const handleCreateEventPress = () => {
+    if (loggedIn) {
+      setModal("event");
+      return;
+    }
+
+    Alert.alert(
+      "Account Required",
+      "Log in with the form above or create an account before creating an event.",
+      [
+        { text: "LOG IN", style: "cancel" },
+        { text: "CREATE ACCOUNT", onPress: () => setModal("account") },
+      ]
+    );
+  };
+
   const handleCreateEvent = async (values: Record<string, string>) => {
     if (!loggedIn) {
-      Alert.alert("Login Required", "Log in or set EXPO_PUBLIC_JWT_TOKEN in .env first.");
+      setModal(null);
+      Alert.alert(
+        "Account Required",
+        "Log in or create an account before creating an event."
+      );
       return;
     }
 
@@ -219,7 +239,7 @@ export default function WelcomeScreen() {
             <TouchableOpacity
               style={styles.linkButton}
               activeOpacity={0.7}
-              onPress={() => setModal("event")}
+              onPress={handleCreateEventPress}
             >
               <Text style={styles.linkText}>Create Event</Text>
               <View style={styles.linkUnderline} />

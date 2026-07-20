@@ -273,7 +273,7 @@ export default function UploadScreen() {
       Alert.alert(
         "Upload Complete",
         `${result.uploaded} photo${result.uploaded !== 1 ? "s" : ""} uploaded to ${
-          selectedEventName ?? `event ${eventId}`
+          selectedEventName ?? "the selected event"
         }.`
       );
     } catch (error: any) {
@@ -328,7 +328,7 @@ export default function UploadScreen() {
             {!eventsLoading && (
               <Text style={s.eventSelectHint} numberOfLines={1}>
                 {selectedEventName
-                  ? `Event ${eventId}`
+                  ? "Selected event"
                   : events.length > 0
                     ? `${events.length} available`
                     : "No events available"}
@@ -433,7 +433,7 @@ export default function UploadScreen() {
                           selected && s.eventOptionIdSelected,
                         ]}
                       >
-                        Event {item.event_id}
+                        Available to your account
                       </Text>
                     </View>
                     {selected && (

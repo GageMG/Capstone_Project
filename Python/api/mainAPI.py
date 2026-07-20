@@ -3,7 +3,8 @@ import os
 import time
 from logging.handlers import RotatingFileHandler
 from typing import List
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from urllib.parse import unquote, urlparse
 
 import fastapi
 import jwt
@@ -235,37 +236,6 @@ def userOwnsLocation(location: dict, current_user_id: int) -> bool:
     owner_id = event.get("user_id") or event.get("owner_id")
     return owner_id == current_user_id
 
-logger = setup_logger()
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="users/login")
-authMang = Auth.Auth()
-
-blob = blobHandler(logger)
-db = SQLbuilder(logger)
-db.connect()
-
-uc = UserClass.Users(db=db, log=logger)
-ev = EventsClass.Manager(db=db, log=logger)
-qrCode = qrGen.genQR(db=db, log=logger, blob=blob)
-
-if IS_PRODUCTION:
-    app = fastapi.FastAPI(title='CSI4999', docs_url=None, redoc_url=None, openapi_url=None)
-else:
-    app = fastapi.FastAPI(title='CSI4999')
-uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
-
-ALLOWED_ORIGINS = [
-    "https://zealous-stone-0f78c580f.7.azurestaticapps.net",
-    "http://localhost:8081",
-    "http://localhost:3000",
-    "http://localhost:5173",
-]
-
-app.add_middleware(CORSMiddleware,allow_origins=ALLOWED_ORIGINS,allow_credentials=True,allow_methods=["*"],allow_headers=["*"])
-
-RATE_LIMIT_BUCKETS: dict[str, list[float]] = {}
-
-
 def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
     upload = item.get("uploads") or {}
     guest = upload.get("guests") or None
@@ -324,6 +294,26 @@ def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
 
 def generatedVideoBlobName(video: dict) -> str:
     return (f"events/{video['event_id']}/generated_videos/{video['file_name']}")
+
+def generateEventQRCode(event_id: int,expires_at: str,max_uploads: int = 50,replace_existing: bool = False):
+    result = qrCode.generateQRcode(eventID=event_id,expirationDate=expires_at,maxUpload=max_uploads,purpose="guests",setActive=True)
+    if replace_existing:
+        db.deactivateEventQRCodes(event_id, exceptToken=result["token"])
+    signed_image = blob.getSignedBlobUrl(
+        result["qr_blob_name"],
+        expiresInMinutes=60,
+    )
+
+    return {
+        "event_id": event_id,
+        "status": "created",
+        "qr_image_url": signed_image["url"],
+        "qr_image_url_expires_at": signed_image["expires_at"],
+        "scan_url": result["qr_url"],
+        "token": result["token"],
+        "expires_at": result["expires_at"],
+        "result": result,
+    }
 
 def getClientIp(req: Request) -> str:
     if req.client and req.client.host:
@@ -468,7 +458,7 @@ def getCurrentUser(current_user_id: int = Depends(getCurrentUserID)):
 
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="User profile could not be loaded.") from None
     
-@app.get('users/me')
+@app.get('/users/me', response_model=dc.userResponse)
 def getCurrentUser(current_user_id: int = Depends(getCurrentUserID)):
     try:
         user = db.getUserInfo(current_user_id)
@@ -527,32 +517,26 @@ def updateCurrentUserPassword(passwords: dc.userPasswordUpdate,current_user_id: 
 async def createQR(req: dc.QRRequest,current_user_id: int = Depends(getCurrentUserID)):
     verifyEventOwner(req.event_id, current_user_id)
 
-    result = qrCode.generateQRcode(
-        eventID=req.event_id,
-        expirationDate=req.expires_at,
-        maxUpload=req.max_uploads,
-        purpose=req.purpose,
-        setActive=req.is_active
+    return generateEventQRCode(
+        event_id=req.event_id,
+        expires_at=req.expires_at,
+        max_uploads=req.max_uploads if req.max_uploads > 0 else 50,
+        replace_existing=True,
     )
-
-    return {
-        "event_id": req.event_id,
-        "status": "created",
-        "qr_image_url": result["qr_image_url"],
-        "scan_url": result["qr_url"],
-        "result": result
-    }
 
 @app.post('/qr/validate')
 async def validateQR(req: dc.validateToken, request: Request ):
     checkRateLimit(f"qr_validate:{getClientIp(request)}", maxCall= 20, windowSec=6)
     verifyGuestQRCode(req.event_id, req.token)
 
+    event = ev.getEventByID(req.event_id)
+
     return {
-        "event_id": req.event_id,
-        "valid": True,
-        "reason": "QR code is valid."
-    }
+    "event_id": req.event_id,
+    "event_name": event.get("name") if event else None,
+    "valid": True,
+    "reason": "QR code is valid.",
+}
 
 #API endpoint for the upload function
 @app.post("/upload/user")
@@ -576,6 +560,8 @@ async def uploadGuestPhotos(request: Request, eventID: int = Form(...),qrToken: 
     verifyGuestQRCode(eventID, qrToken)
 
     guest = db.getGuestForEvent(guestID, eventID)
+
+
     if not guest:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -594,6 +580,8 @@ async def uploadGuestPhotos(request: Request, eventID: int = Form(...),qrToken: 
         jobs = enqueuePreprocessJobs(eventID, res)
         res["jobs"] = jobs
         res["job"] = jobs[0] if jobs else None
+
+    db.incrementQRUploadCount(qrToken, res["uploaded"])
 
     return res
 
@@ -675,13 +663,14 @@ async def loginUser(login: dc.userLogin, request: Request):
     checkRateLimit(f"login: {getClientIp(request)}", 5, 60 )
     try:
 
-        user = uc.loginUser(login)
+        user  = uc.loginUser(login)
 
         if user is None:
             raise HTTPException(status_code=401,detail="Invalid email/username or password.")
         
+        profile = db.getUserInfo(user)
         token = authMang.createAccessToken(user)
-        return {"access_token": token, "token_type": "bearer"}
+        return {"access_token": token, "token_type": "bearer", "user": profile}
     except HTTPException:
         raise
     except Exception as e:
@@ -699,9 +688,22 @@ def create_event(event: dc.eventCreate, location: dc.eventLocation,  current_use
             detail="Event could not be created."
         )
 
+    created_event = result["event"]
+    qr_code = None
+    qr_error = None
+
+    try:
+        qr_code = generateEventQRCode(event_id=created_event["event_id"],expires_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(),max_uploads=event.upload_limit if event.upload_limit > 0 else 50)
+    
+    except Exception:
+        qr_error = ("Automatic QR generation failed. Use Recreate QR from the Events screen.")
+        logger.exception(f"Event was created but QR generation failed. event_id={created_event['event_id']}")
+
     return {
         "message": "Event created successfully.",
-        "data": result
+        "data": result,
+        "qr_code": qr_code,
+        "qr_error": qr_error,
     }
     
 @app.get("/locations/all")
@@ -816,6 +818,35 @@ def getMyEvents(current_user_id: int = Depends(getCurrentUserID)):
         "message": "Events loaded successfully.",
         "count": len(events),
         "events": events
+    }
+
+def qrBlobNameFromURL(image_url: str) -> str:
+    path = unquote(urlparse(image_url).path).lstrip("/")
+    container_prefix = f"{blob.container}/"
+    return path[len(container_prefix):] if path.startswith(container_prefix) else path
+
+@app.get("/events/{eventID}/qr")
+def getEventQRCode(eventID: int,current_user_id: int = Depends(getCurrentUserID)):
+    verifyEventOwner(eventID, current_user_id)
+    row = db.getActiveEventQRCode(eventID)
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="This event does not have an active QR code.",
+        )
+
+    signed_image = blob.getSignedBlobUrl(
+        qrBlobNameFromURL(row["image_url"]),
+        expiresInMinutes=60,
+    )
+    return {
+        "event_id": eventID,
+        "status": "active",
+        "qr_image_url": signed_image["url"],
+        "qr_image_url_expires_at": signed_image["expires_at"],
+        "scan_url": qrCode.generateUrl(eventID, row["token"]),
+        "token": row["token"],
+        "expires_at": row["expires_at"],
     }
 
 @app.patch("/locations/{locationID}")

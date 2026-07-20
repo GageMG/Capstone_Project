@@ -98,9 +98,22 @@ export default function TabLayout() {
         name="camera"
         options={{
           title: "Camera",
-          tabBarLabelStyle: { marginLeft: 12 },
+          href: Platform.OS === "web" ? null : undefined,
           tabBarIcon: ({ focused }) => (
             <TabIcon name="camera" color="#fff" focused={focused} isCamera />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="events"
+        options={{
+          title: "Events",
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon
+              name={focused ? "calendar" : "calendar-outline"}
+              color={color}
+              focused={focused}
+            />
           ),
         }}
       />
@@ -108,6 +121,7 @@ export default function TabLayout() {
         name="upload"
         options={{
           title: "Upload",
+          href: Platform.OS === "web" ? undefined : null,
           tabBarIcon: ({ color, focused }) => (
             <TabIcon
               name={focused ? "cloud-upload" : "cloud-upload-outline"}

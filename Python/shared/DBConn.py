@@ -2156,3 +2156,46 @@ class SQLbuilder:
         except Exception as e:
             self.log.exception(f"Error loading generated video id={generatedVideoID}: {e}")
             return None
+        
+    def deactivateEventQRCodes(self, eventID: int, exceptToken: str | None = None):
+        if not eventID:
+            return False
+
+        try:
+            query = (
+                self.client
+                .table("qrcodes")
+                .update({"is_active": False})
+                .eq("event_id", eventID)
+                .eq("is_active", True)
+            )
+            if exceptToken:
+                query = query.neq("token", exceptToken)
+            result = query.execute()
+            return result.data is not None
+        except Exception as e:
+            self.log.exception(
+                f"Error deactivating QR codes for event_id={eventID}: {e}"
+            )
+            return False
+
+    def getActiveEventQRCode(self, eventID: int):
+        if not eventID:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("qrcodes")
+                .select("*")
+                .eq("event_id", eventID)
+                .eq("is_active", True)
+                .limit(1)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as e:
+            self.log.exception(
+                f"Error loading active QR code for event_id={eventID}: {e}"
+            )
+            return None

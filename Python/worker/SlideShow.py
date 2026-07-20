@@ -298,14 +298,8 @@ class SlideShowGenerator:
                 else:
                     audio = music.subclipped(0, videoDuration)
                 finalVideo = video.with_audio(audio)
-            finalVideo.write_videofile(
-                outPutPath,
-                codec="libx264",
-                audio=bool(musicPath),
-                audio_codec="aac" if musicPath else None,
-                ffmpeg_params=["-movflags", "+faststart"],
-                logger=None,
-            )
+            finalVideo.write_videofile(outPutPath, codec="libx264",audio=bool(musicPath),audio_codec="aac" if musicPath else None,ffmpeg_params=["-movflags", "+faststart"],logger=None)
+            
         finally:
             if finalVideo is not video:
                 finalVideo.close()

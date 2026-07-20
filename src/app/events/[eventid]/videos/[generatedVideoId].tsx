@@ -134,7 +134,7 @@ export default function GeneratedVideoScreen() {
           </TouchableOpacity>
           <View style={styles.heading}>
             <Text style={[styles.eyebrow, { color: colors.accent }]}>
-              EVENT {eventId ?? ""}
+              YOUR EVENT
             </Text>
             <Text style={[styles.title, { color: colors.textBright }]}>
               Generated video

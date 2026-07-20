@@ -402,7 +402,7 @@ export default function CameraScreen() {
       } as any);
       await apiUpload("/upload/user", form);
       setPreviewPhoto(null);
-      Alert.alert("Uploaded", `Photo uploaded to ${eventName ?? `event ${eventId}`}.`);
+      Alert.alert("Uploaded", `Photo uploaded to ${eventName ?? "the selected event"}.`);
     } catch (error: any) {
       Alert.alert("Upload Failed", error.message ?? "Please try again.");
     } finally {
@@ -502,7 +502,7 @@ export default function CameraScreen() {
             eventName
               ? `Upload to ${eventName}`
               : eventId
-                ? `Upload to Event ${eventId}`
+                ? "Upload to selected event"
                 : "Upload"
           }
           uploading={isUploading}

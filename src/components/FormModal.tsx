@@ -18,10 +18,13 @@ import { useEffect, useMemo, useState } from "react";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
+const EMPTY_INITIAL_VALUES: Record<string, string> = {};
+
 export type FormField = {
   key: string;
   label: string;
   placeholder: string;
+  required?: boolean;
   secure?: boolean;
   keyboardType?: KeyboardTypeOptions;
   multiline?: boolean;
@@ -35,6 +38,7 @@ type FormModalProps = {
   fields: FormField[];
   submitLabel: string;
   submitting?: boolean;
+  initialValues?: Record<string, string>;
   onClose: () => void;
   onSubmit: (values: Record<string, string>) => void;
 };
@@ -46,6 +50,7 @@ export default function FormModal({
   fields,
   submitLabel,
   submitting = false,
+  initialValues = EMPTY_INITIAL_VALUES,
   onClose,
   onSubmit,
 }: FormModalProps) {
@@ -54,11 +59,13 @@ export default function FormModal({
   const [values, setValues] = useState<Record<string, string>>({});
 
   useEffect(() => {
-    if (!visible) setValues({});
-  }, [visible]);
+    setValues(visible ? initialValues : {});
+  }, [visible, initialValues]);
 
   const handleSubmit = () => {
-    const missing = fields.find((f) => !(values[f.key] ?? "").trim());
+    const missing = fields.find(
+      (f) => f.required !== false && !(values[f.key] ?? "").trim()
+    );
     if (missing) {
       Alert.alert("Missing Field", `Please fill in ${missing.label}.`);
       return;

@@ -229,6 +229,7 @@ class eventLocationModify(BaseModel):
 class tokenReturn(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    user: userResponse
 
 class StoryboardCreateRequest(BaseModel):
     event_id: int = Field(..., gt=0)

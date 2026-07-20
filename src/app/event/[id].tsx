@@ -18,6 +18,7 @@ import {
 import GeneratedVideoPlayer from "@/components/GeneratedVideoPlayer";
 import Lightbox, { LightboxPhoto } from "@/components/Lightbox";
 import { apiFetch } from "@/lib/api";
+import { useCurrentEvent } from "@/lib/CurrentEventContext";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
 
@@ -198,6 +199,7 @@ function UploadedVideoModal({
 export default function EventDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { colors: c } = useTheme();
+  const { setCurrentEvent } = useCurrentEvent();
   const s = useMemo(() => makeStyles(c), [c]);
   const [event, setEvent] = useState<EventInfo | null>(null);
   const [photos, setPhotos] = useState<LightboxPhoto[]>([]);
@@ -536,6 +538,33 @@ export default function EventDetailScreen() {
         </>
       )}
 
+      {event && id ? (
+        <View style={s.floatingActions}>
+          <TouchableOpacity
+            style={[s.floatingButton, s.chatButton]}
+            accessibilityLabel="Open video assistant for this event"
+            onPress={() =>
+              router.push({
+                pathname: "/chatbot",
+                params: { eventId: id },
+              })
+            }
+          >
+            <Ionicons name="chatbubble-ellipses" size={21} color="#fff" />
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={s.floatingButton}
+            accessibilityLabel="Upload photos to this event"
+            onPress={() => {
+              setCurrentEvent(event.event_id, event.name);
+              router.push("/upload");
+            }}
+          >
+            <Ionicons name="cloud-upload" size={22} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      ) : null}
+
       {lightboxIndex !== null && (
         <Lightbox
           photos={photos}
@@ -711,4 +740,33 @@ const makeStyles = (c: ThemeColors) =>
       paddingVertical: 11,
     },
     retryText: { color: "#fff", fontSize: 14, fontWeight: "700" },
+    floatingActions: {
+      position: "absolute",
+      right: 18,
+      bottom: 20,
+      alignItems: "center",
+      gap: 10,
+    },
+    floatingButton: {
+      width: 56,
+      height: 56,
+      borderRadius: 18,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: c.accentStrong,
+      borderWidth: 1,
+      borderColor: c.accent,
+      shadowColor: "#000",
+      shadowOffset: { width: 0, height: 6 },
+      shadowOpacity: 0.35,
+      shadowRadius: 10,
+      elevation: 9,
+    },
+    chatButton: {
+      width: 48,
+      height: 48,
+      borderRadius: 16,
+      backgroundColor: "#7C3AED",
+      borderColor: "#8B5CF6",
+    },
   });
