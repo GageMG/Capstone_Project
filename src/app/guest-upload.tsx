@@ -25,7 +25,13 @@ type Guest = { guest_id: number; display_name: string };
 type GuestSessionResponse = { guest: Guest };
 type UploadResponse = { uploaded: number; results?: Array<{ error?: string }> };
 type QRValidationResponse = { valid: boolean; event_name?: string | null };
-type PickedPhoto = { id: string; uri: string; name: string; mimeType: string };
+type PickedPhoto = {
+  id: string;
+  uri: string;
+  name: string;
+  mimeType: string;
+  file?: File;
+};
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   jpg: "image/jpeg",
@@ -133,7 +139,15 @@ export default function GuestUploadScreen() {
       const name = asset.fileName ?? `guest_photo_${Date.now()}_${index}.jpg`;
       const mimeType = mimeFor(asset.mimeType, name);
       return mimeType
-        ? [{ id: `${Date.now()}-${index}`, uri: asset.uri, name, mimeType }]
+        ? [
+            {
+              id: `${Date.now()}-${index}`,
+              uri: asset.uri,
+              name,
+              mimeType,
+              file: asset.file ?? undefined,
+            },
+          ]
         : [];
     });
     setPhotos(picked);
@@ -147,13 +161,27 @@ export default function GuestUploadScreen() {
       form.append("eventID", String(eventId));
       form.append("qrToken", qrToken);
       form.append("guestID", String(guest.guest_id));
-      photos.forEach((photo) => {
-        form.append("files", {
-          uri: photo.uri,
-          name: photo.name,
-          type: photo.mimeType,
-        } as any);
-      });
+      for (const photo of photos) {
+        if (Platform.OS === "web") {
+          let file: Blob;
+          if (photo.file) {
+            file = photo.file;
+          } else {
+            const response = await fetch(photo.uri);
+            if (!response.ok) throw new Error(`Could not read ${photo.name}.`);
+            const blob = await response.blob();
+            if (!blob) throw new Error(`Could not read ${photo.name}.`);
+            file = blob;
+          }
+          form.append("files", file, photo.name);
+        } else {
+          form.append("files", {
+            uri: photo.uri,
+            name: photo.name,
+            type: photo.mimeType,
+          } as any);
+        }
+      }
       const result = await apiUpload<UploadResponse>("/upload/guest", form);
       if (result.uploaded < 1) {
         throw new Error(
