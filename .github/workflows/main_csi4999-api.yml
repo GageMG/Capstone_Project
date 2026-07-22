@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "Python/api/**"
+      - "Python/requirements.txt"
       - ".github/workflows/main_csi4999-api.yml"
 
   workflow_dispatch:
@@ -13,6 +14,7 @@ on:
 env:
   PYTHON_VERSION: "3.11"
   API_PATH: "Python/api"
+  REQUIREMENTS_PATH: "Python/requirements.txt"
 
 jobs:
   build:
@@ -25,21 +27,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Show repository folders
-        run: |
-          pwd
-          find . -maxdepth 3 -type d
-
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
       - name: Install API dependencies
-        working-directory: ${{ env.API_PATH }}
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r "${{ env.REQUIREMENTS_PATH }}"
+
+      - name: Copy requirements into API deployment folder
+        run: |
+          cp "${{ env.REQUIREMENTS_PATH }}" "${{ env.API_PATH }}/requirements.txt"
 
       - name: Upload API deployment artifact
         uses: actions/upload-artifact@v4
