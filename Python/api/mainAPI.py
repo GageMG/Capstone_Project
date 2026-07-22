@@ -1,30 +1,24 @@
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from typing import List
-from datetime import datetime, timezone, timedelta
 from urllib.parse import unquote, urlparse
 
 import fastapi
 import jwt
 import uvicorn
-from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from api import (Auth, ChatBot, EventsClass, StoryBoard, Uploads, UserClass,
+                 qrGen)
+from fastapi import (Depends, File, Form, HTTPException, Query, Request,
+                     UploadFile, status)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
-
-from api import Auth
-from api import ChatBot
-from api import EventsClass
-from api import qrGen
-from api import StoryBoard
-from api import Uploads
-from api import UserClass
-
+from fastapi.security import OAuth2PasswordBearer
+from shared import DataStruct as dc
 from shared.AzureClass import blobHandler
 from shared.DBConn import SQLbuilder
-from shared import DataStruct as dc
 
 APP_ENV = os.getenv("APP_ENV", "development").lower().strip()
 IS_PRODUCTION = APP_ENV == "production"
@@ -79,6 +73,7 @@ uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
 
 ALLOWED_ORIGINS = [
     "https://zealous-stone-0f78c580f.7.azurestaticapps.net",
+    'https://purple-pebble-08579aa10.7.azurestaticapps.net',
     "http://localhost:8081",
     "http://localhost:3000",
     "http://localhost:5173",

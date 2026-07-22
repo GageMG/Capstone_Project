@@ -1,4 +1,10 @@
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? "https://csi4999-api-h4exhuc3b3btafg3.eastus-01.azurewebsites.net/").replace(/\/+$/, "");
+const apiURL = process.env.EXPO_PUBLIC_API_URL;
+
+if (!apiURL) {
+  throw new Error("EXPO_PUBLIC_API_URL is not configured.");
+}
+
+export const API_URL = apiURL.replace(/\/+$/, "");
 
 let token = process.env.EXPO_PUBLIC_JWT_TOKEN ?? "";
 
