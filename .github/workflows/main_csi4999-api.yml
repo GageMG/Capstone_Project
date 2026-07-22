@@ -58,11 +58,12 @@ jobs:
       contents: read
 
     steps:
-      - name: Download artifact from build job
+      - name: Download API deployment artifact
         uses: actions/download-artifact@v4
         with:
-          name: python-app
-      
+          name: python-api
+          path: api-package
+
       - name: Login to Azure
         uses: azure/login@v2
         with:
@@ -70,10 +71,12 @@ jobs:
           tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_039F3B379BD74315857365DDACAFC6D9 }}
           subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_465D1896EEB748D5B6318C3ECDE2B4DC }}
 
-      - name: 'Deploy to Azure Web App'
+      - name: Deploy API to Azure Web App
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: 'csi4999-api'
-          slot-name: 'Production'
+          app-name: "csi4999-api"
+          slot-name: "Production"
+          package: "api-package"
           
+  
