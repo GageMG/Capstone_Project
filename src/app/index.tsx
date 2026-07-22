@@ -3,7 +3,7 @@ import { apiFetch, apiPublicFetch } from "@/lib/api";
 import { useAuth } from "@/lib/AuthContext";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
-import { router } from "expo-router";
+import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
 import {
   Alert,
@@ -52,7 +52,14 @@ const parseDate = (s: string) => {
   return `${y}-${String(mo).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 };
 
+const firstParam = (value: string | string[] | undefined) =>
+  Array.isArray(value) ? value[0] : value;
+
 export default function WelcomeScreen() {
+  const params = useLocalSearchParams<{
+    eventID?: string | string[];
+    qrToken?: string | string[];
+  }>();
   const { colors: c } = useTheme();
   const { loggedIn, signIn } = useAuth();
   const styles = useMemo(() => makeStyles(c), [c]);
@@ -63,6 +70,20 @@ export default function WelcomeScreen() {
   const [loggingIn, setLoggingIn] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [modalError, setModalError] = useState<string | null>(null);
+
+  const guestEventID = firstParam(params.eventID);
+  const guestQRToken = firstParam(params.qrToken);
+
+  if (guestEventID && guestQRToken) {
+    return (
+      <Redirect
+        href={{
+          pathname: "/guest-upload",
+          params: { eventID: guestEventID, qrToken: guestQRToken },
+        }}
+      />
+    );
+  }
 
   const handleLogin = async () => {
     const login = username.trim();
