@@ -127,7 +127,7 @@ class genQR():
         }
 
     
-    def validateQRcode(self, eventID: int, token:str):
+    def validateQRcode(self, eventID: int, token: str, enforceUploadLimit: bool = True):
         if token is None or token.strip() == "":
             return False, "Missing Token"
         
@@ -166,7 +166,7 @@ class genQR():
         max_uploads = qrToken.get("max_uploads")
         upload_count = qrToken.get("upload_count", 0)
 
-        if max_uploads is not None:
+        if enforceUploadLimit and max_uploads is not None:
             if int(upload_count) >= int(max_uploads):
                 return False, "Upload limit reached"
 

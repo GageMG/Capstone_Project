@@ -205,11 +205,15 @@ def verifyEventOwner(eventID: int, current_user_id: int) -> dict:
 
     return event
 
-def verifyGuestQRCode(eventID: int, qrToken: str):
+def verifyGuestQRCode(eventID: int, qrToken: str, enforceUploadLimit: bool = True):
     if not qrToken:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="QR token is required.")
 
-    valid, reason = qrCode.validateQRcode(eventID=eventID, token=qrToken)
+    valid, reason = qrCode.validateQRcode(
+        eventID=eventID,
+        token=qrToken,
+        enforceUploadLimit=enforceUploadLimit,
+    )
 
     if not valid:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=reason or "Invalid or expired QR code.")
@@ -509,7 +513,13 @@ async def createQR(req: dc.QRRequest,current_user_id: int = Depends(getCurrentUs
 @app.post('/qr/validate')
 async def validateQR(req: dc.validateToken, request: Request ):
     checkRateLimit(f"qr_validate:{getClientIp(request)}", maxCall= 20, windowSec=6)
-    verifyGuestQRCode(req.event_id, req.token)
+    verifyGuestQRCode(req.event_id, req.token, enforceUploadLimit=False)
+
+    can_upload, upload_reason = qrCode.validateQRcode(
+        eventID=req.event_id,
+        token=req.token,
+        enforceUploadLimit=True,
+    )
 
     event = ev.getEventByID(req.event_id)
 
@@ -518,6 +528,8 @@ async def validateQR(req: dc.validateToken, request: Request ):
     "event_name": event.get("name") if event else None,
     "valid": True,
     "reason": "QR code is valid.",
+    "can_upload": can_upload,
+    "upload_reason": None if can_upload else upload_reason,
 }
 
 #API endpoint for the upload function
@@ -819,6 +831,77 @@ def getEventMedia(eventID: int, dataType: str = "both", limit: int = Query(defau
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Event media could not be loaded.",
         ) from e
+
+@app.get("/events/{eventID}/guest-media")
+def getGuestEventMedia(eventID: int,qrToken: str,request: Request,limit: int = Query(default=60, ge=1, le=100),offset: int = Query(default=0, ge=0),):
+    checkRateLimit(f"guest_media:{getClientIp(request)}:{hash(qrToken)}",maxCall=120,windowSec=3600,)
+    verifyGuestQRCode(eventID, qrToken, enforceUploadLimit=False)
+
+    try:
+        media = db.getAllMedia(eventID=eventID,dataType="both",limit=limit,offset=offset)
+        visible_photos = []
+        visible_videos = []
+
+        for item in media["photos"]:
+            filter_status = str(item.get("filter_status") or "").strip().lower()
+            user_approved = item.get("user_approved") in (True, 1, "1")
+            if filter_status != "approved" and not user_approved:
+                continue
+
+            normalized = normalizeMediaRecord(item, "photo")
+            if not normalized.get("display_url"):
+                continue
+
+            visible_photos.append({
+                "id": normalized["id"],
+                "event_id": eventID,
+                "display_url": normalized["display_url"],
+                "display_url_expires_at": normalized["display_url_expires_at"],
+                "created_at": normalized["created_at"],
+                "nudity_check": normalized.get("nudity_check", False),
+            })
+
+        for item in media["videos"]:
+            video_status = str(item.get("status") or "").strip().lower()
+            if video_status in {"failed", "rejected"}:
+                continue
+
+            normalized = normalizeMediaRecord(item, "video")
+            if not normalized.get("display_url"):
+                continue
+
+            visible_videos.append({
+                "id": normalized["id"],
+                "event_id": eventID,
+                "display_url": normalized["display_url"],
+                "display_url_expires_at": normalized["display_url_expires_at"],
+                "created_at": normalized["created_at"],
+                "title": normalized.get("title") or normalized.get("original_file_name") or "Event video",
+                "duration_seconds": normalized.get("duration_seconds"),
+                "status": normalized.get("status"),
+            })
+
+        raw_photo_count = len(media["photos"])
+        raw_video_count = len(media["videos"])
+        next_offset = offset + max(raw_photo_count, raw_video_count)
+
+        return {
+            "event_id": eventID,
+            "photos": visible_photos,
+            "videos": visible_videos,
+            "photo_count": len(visible_photos),
+            "video_count": len(visible_videos),
+            "next_offset": next_offset,
+            "has_more_photos": offset + raw_photo_count < media["photo_total"],
+            "has_more_videos": offset + raw_video_count < media["video_total"],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail=str(e),) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting guest media for event_id={eventID}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="The guest album could not be loaded.") from e
 
 @app.patch("/events/modify/{eventID}")
 def modifyEvent(eventID: int, event: dc.eventModify, current_user_id: int = Depends(getCurrentUserID)):
