@@ -5,14 +5,14 @@ on:
     branches:
       - main
     paths:
-      - "Python/API/**"
+      - "Python/api/**"
       - ".github/workflows/main_csi4999-api.yml"
 
   workflow_dispatch:
 
 env:
   PYTHON_VERSION: "3.11"
-  API_PATH: "Python/API"
+  API_PATH: "Python/api"
 
 jobs:
   build:
@@ -24,6 +24,11 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Show repository folders
+        run: |
+          pwd
+          find . -maxdepth 3 -type d
 
       - name: Set up Python
         uses: actions/setup-python@v5
