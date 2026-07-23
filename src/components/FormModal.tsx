@@ -16,6 +16,8 @@ import {
 import { useEffect, useMemo, useState } from "react";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
+import CalendarDateField from "@/components/CalendarDateField";
+import SelectField from "@/components/SelectField";
 
 const EMPTY_INITIAL_VALUES: Record<string, string> = {};
 
@@ -29,6 +31,8 @@ export type FormField = {
   multiline?: boolean;
   autoCapitalize?: "none" | "sentences" | "words" | "characters";
   hint?: string;
+  kind?: "text" | "date" | "select";
+  options?: string[];
 };
 
 type FormModalProps = {
@@ -124,38 +128,61 @@ export default function FormModal({
             {fields.map((f, index) => (
               <View key={f.key} style={m.fieldGroup}>
                 <Text style={m.label}>{f.label.toUpperCase()}</Text>
-                <View
-                  style={[
-                    m.inputWrapper,
-                    f.multiline && m.inputWrapperMultiline,
-                  ]}
-                >
-                  <TextInput
-                    style={[m.input, f.multiline && m.inputMultiline]}
-                    placeholder={f.placeholder}
-                    placeholderTextColor={c.textMuted}
+                {f.kind === "date" ? (
+                  <CalendarDateField
                     value={values[f.key] ?? ""}
-                    onChangeText={(t) => {
+                    placeholder={f.placeholder}
+                    onChange={(value) => {
                       setValidationError(null);
                       onChange?.();
-                      setValues((prev) => ({ ...prev, [f.key]: t }));
+                      setValues((prev) => ({ ...prev, [f.key]: value }));
                     }}
-                    secureTextEntry={f.secure}
-                    keyboardType={f.keyboardType}
-                    autoCapitalize={
-                      f.autoCapitalize ??
-                      (f.secure || f.keyboardType === "email-address"
-                        ? "none"
-                        : "sentences")
-                    }
-                    autoCorrect={!f.secure && f.keyboardType !== "email-address"}
-                    multiline={f.multiline}
-                    returnKeyType={index === fields.length - 1 ? "done" : "next"}
-                    onSubmitEditing={
-                      index === fields.length - 1 ? handleSubmit : undefined
-                    }
                   />
-                </View>
+                ) : f.kind === "select" ? (
+                  <SelectField
+                    value={values[f.key] ?? ""}
+                    options={f.options ?? []}
+                    placeholder={f.placeholder}
+                    onChange={(value) => {
+                      setValidationError(null);
+                      onChange?.();
+                      setValues((prev) => ({ ...prev, [f.key]: value }));
+                    }}
+                  />
+                ) : (
+                  <View
+                    style={[
+                      m.inputWrapper,
+                      f.multiline && m.inputWrapperMultiline,
+                    ]}
+                  >
+                    <TextInput
+                      style={[m.input, f.multiline && m.inputMultiline]}
+                      placeholder={f.placeholder}
+                      placeholderTextColor={c.textMuted}
+                      value={values[f.key] ?? ""}
+                      onChangeText={(t) => {
+                        setValidationError(null);
+                        onChange?.();
+                        setValues((prev) => ({ ...prev, [f.key]: t }));
+                      }}
+                      secureTextEntry={f.secure}
+                      keyboardType={f.keyboardType}
+                      autoCapitalize={
+                        f.autoCapitalize ??
+                        (f.secure || f.keyboardType === "email-address"
+                          ? "none"
+                          : "sentences")
+                      }
+                      autoCorrect={!f.secure && f.keyboardType !== "email-address"}
+                      multiline={f.multiline}
+                      returnKeyType={index === fields.length - 1 ? "done" : "next"}
+                      onSubmitEditing={
+                        index === fields.length - 1 ? handleSubmit : undefined
+                      }
+                    />
+                  </View>
+                )}
                 {f.hint ? <Text style={m.hint}>{f.hint}</Text> : null}
               </View>
             ))}

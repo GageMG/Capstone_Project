@@ -26,7 +26,7 @@ import { useTheme } from "@/theme/ThemeContext";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const THUMB = (SCREEN_WIDTH - 56) / 3;
 
-const MAX_MEDIA_ITEMS = 20;
+const UPLOAD_BATCH_SIZE = 20;
 
 type SupportedMimeType =
   | "image/jpeg"
@@ -53,7 +53,7 @@ type PickedMedia = {
 type EventOption = { event_id: number; name: string };
 type UploadResponse = {
   uploaded: number;
-  results?: Array<{ status?: string; error?: string; reason?: string }>;
+  results?: Array<{ file_name?: string; status?: string; error?: string; reason?: string }>;
 };
 
 const MIME_BY_EXTENSION: Record<string, SupportedMimeType> = {
@@ -110,6 +110,7 @@ export default function UploadScreen() {
   const s = useMemo(() => makeStyles(c), [c]);
   const [mediaItems, setMediaItems] = useState<PickedMedia[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [securityConfirmed, setSecurityConfirmed] = useState(false);
   const [events, setEvents] = useState<EventOption[]>([]);
@@ -170,11 +171,6 @@ export default function UploadScreen() {
       return false;
     }
 
-    if (mediaItems.length > MAX_MEDIA_ITEMS) {
-      Alert.alert("Too Many Files", `You can only upload ${MAX_MEDIA_ITEMS} files at once.`);
-      return false;
-    }
-
     const invalidItem = mediaItems.find((item) => !isValidMedia(item));
     if (invalidItem) {
       Alert.alert(
@@ -206,7 +202,7 @@ export default function UploadScreen() {
       mediaTypes: ImagePicker.MediaTypeOptions.All,
       allowsMultipleSelection: true,
       quality: 0.85,
-      selectionLimit: MAX_MEDIA_ITEMS,
+      selectionLimit: 0,
     });
 
     if (!result.canceled) {
@@ -238,13 +234,7 @@ export default function UploadScreen() {
         );
       }
 
-      const combined = [...mediaItems, ...picked].slice(0, MAX_MEDIA_ITEMS);
-
-      if (mediaItems.length + picked.length > MAX_MEDIA_ITEMS) {
-        Alert.alert("Upload Limit", `Only ${MAX_MEDIA_ITEMS} files can be selected at once.`);
-      }
-
-      setMediaItems(combined);
+      setMediaItems((current) => [...current, ...picked]);
       setDone(false);
     }
   };
@@ -262,56 +252,72 @@ export default function UploadScreen() {
     if (!validateUpload()) return;
 
     setUploading(true);
+    setUploadProgress(`0/${mediaItems.length}`);
+    const completedIds = new Set<string>();
+    let totalUploaded = 0;
     try {
-      const formData = new FormData();
+      for (let start = 0; start < mediaItems.length; start += UPLOAD_BATCH_SIZE) {
+        const batch = mediaItems.slice(start, start + UPLOAD_BATCH_SIZE);
+        const formData = new FormData();
+        formData.append("eventID", String(eventId));
 
-      formData.append("eventID", String(eventId));
-
-      for (const item of mediaItems) {
-        if (Platform.OS === "web") {
-          let file: Blob;
-          if (item.file) {
-            file = item.file.type === item.mimeType
-              ? item.file
-              : item.file.slice(0, item.file.size, item.mimeType);
+        for (const item of batch) {
+          if (Platform.OS === "web") {
+            let file: Blob;
+            if (item.file) {
+              file = item.file.type === item.mimeType
+                ? item.file
+                : item.file.slice(0, item.file.size, item.mimeType);
+            } else {
+              const response = await fetch(item.uri);
+              if (!response.ok) throw new Error(`Could not read ${item.name}.`);
+              const blob = await response.blob();
+              file = blob.type === item.mimeType
+                ? blob
+                : blob.slice(0, blob.size, item.mimeType);
+            }
+            formData.append("files", file, item.name);
           } else {
-            const response = await fetch(item.uri);
-            if (!response.ok) throw new Error(`Could not read ${item.name}.`);
-            const blob = await response.blob();
-            file = blob.type === item.mimeType
-              ? blob
-              : blob.slice(0, blob.size, item.mimeType);
+            formData.append("files", {
+              uri: item.uri,
+              name: item.name,
+              type: item.mimeType,
+            } as any);
           }
-          formData.append("files", file, item.name);
-        } else {
-          formData.append("files", {
-            uri: item.uri,
-            name: item.name,
-            type: item.mimeType,
-          } as any);
         }
+
+        const result = await apiUpload<UploadResponse>("/upload/user", formData);
+        totalUploaded += result.uploaded;
+        const resultsByName = new Map(result.results?.map((item) => [item.file_name, item]) ?? []);
+        batch.forEach((item) => {
+          const fileResult = resultsByName.get(item.name);
+          if (fileResult?.status === "saved" || (!result.results && result.uploaded === batch.length)) {
+            completedIds.add(item.id);
+          }
+        });
+        setUploadProgress(`${Math.min(start + batch.length, mediaItems.length)}/${mediaItems.length}`);
       }
 
-      const result = await apiUpload<UploadResponse>("/upload/user", formData);
-      if (result.uploaded < 1) {
-        const failed = result.results?.find((item) => item.error || item.reason);
-        throw new Error(failed?.error ?? failed?.reason ?? "The server did not accept any files.");
-      }
-
-      setDone(true);
-      setMediaItems([]);
-      setSecurityConfirmed(false);
+      const failedCount = mediaItems.length - completedIds.size;
+      setMediaItems((current) => current.filter((item) => !completedIds.has(item.id)));
+      setDone(failedCount === 0);
+      if (failedCount === 0) setSecurityConfirmed(false);
 
       Alert.alert(
-        "Upload Complete",
-        `${result.uploaded} file${result.uploaded !== 1 ? "s" : ""} uploaded to ${
+        failedCount === 0 ? "Upload Complete" : "Upload Partially Complete",
+        `${totalUploaded} file${totalUploaded !== 1 ? "s" : ""} uploaded to ${
           selectedEventName ?? "the selected event"
-        }.`
+        }.${failedCount ? ` ${failedCount} file${failedCount === 1 ? "" : "s"} remain selected because they were not accepted.` : ""}`
       );
     } catch (error: any) {
-      Alert.alert("Upload Failed", error.message ?? "Please try again.");
+      setMediaItems((current) => current.filter((item) => !completedIds.has(item.id)));
+      Alert.alert(
+        totalUploaded > 0 ? "Upload Stopped" : "Upload Failed",
+        `${totalUploaded > 0 ? `${totalUploaded} files uploaded before the error. ` : ""}${error.message ?? "Please try again."}`
+      );
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -506,7 +512,7 @@ export default function UploadScreen() {
             </View>
             <Text style={s.dropTitle}>Choose Photos or Videos</Text>
             <Text style={s.dropSub}>
-              Tap to browse your device library{"\n"}Up to 20 files at once
+              Tap to browse your device library{"\n"}Large selections upload in batches of 20
             </Text>
             <View style={s.selectBadge}>
               <Ionicons name="add" size={14} color="#fff" />
@@ -595,7 +601,7 @@ export default function UploadScreen() {
             {uploading ? (
               <>
                 <ActivityIndicator color="#fff" size="small" />
-                <Text style={s.uploadBtnText}>UPLOADING…</Text>
+                <Text style={s.uploadBtnText}>UPLOADING {uploadProgress ?? "…"}</Text>
               </>
             ) : (
               <>

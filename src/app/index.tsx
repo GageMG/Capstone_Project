@@ -33,8 +33,14 @@ const ACCOUNT_FIELDS: FormField[] = [
 
 const EVENT_FIELDS: FormField[] = [
   { key: "name", label: "Event Name", placeholder: "e.g. Sarah's Wedding" },
-  { key: "type", label: "Type", placeholder: "Wedding, Birthday, Graduation…" },
-  { key: "event_date", label: "Date", placeholder: "MM/DD/YYYY" },
+  {
+    key: "type",
+    label: "Type",
+    placeholder: "Select event type",
+    kind: "select",
+    options: ["Wedding", "Birthday", "Graduation", "Concert", "Sports", "Corporate", "Other"],
+  },
+  { key: "event_date", label: "Date", placeholder: "Select event date", kind: "date" },
   { key: "password", label: "Event Password", placeholder: "Password guests will use", secure: true },
   { key: "venue_name", label: "Venue", placeholder: "Venue name" },
   { key: "street", label: "Street", placeholder: "123 Main St" },
@@ -44,6 +50,15 @@ const EVENT_FIELDS: FormField[] = [
 ];
 
 const parseDate = (s: string) => {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(s.trim());
+  if (iso) {
+    const [y, mo, d] = [Number(iso[1]), Number(iso[2]), Number(iso[3])];
+    const date = new Date(y, mo - 1, d);
+    if (date.getFullYear() === y && date.getMonth() === mo - 1 && date.getDate() === d) {
+      return s.trim();
+    }
+    return null;
+  }
   const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(s.trim());
   if (!m) return null;
   const [mo, d, y] = [Number(m[1]), Number(m[2]), Number(m[3])];

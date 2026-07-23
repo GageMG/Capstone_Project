@@ -21,6 +21,8 @@ import {
   View,
 } from "react-native";
 import FormModal, { FormField } from "@/components/FormModal";
+import CalendarDateField from "@/components/CalendarDateField";
+import SelectField from "@/components/SelectField";
 import { apiFetch } from "@/lib/api";
 import { ThemeColors } from "@/theme/colors";
 import { useTheme } from "@/theme/ThemeContext";
@@ -62,8 +64,14 @@ type CreateEventResponse = {
 
 const CREATE_EVENT_FIELDS: FormField[] = [
   { key: "name", label: "Event name", placeholder: "Sarah's Wedding", autoCapitalize: "words" },
-  { key: "type", label: "Event type", placeholder: "Wedding, birthday, graduation", autoCapitalize: "words" },
-  { key: "event_date", label: "Date", placeholder: "MM/DD/YYYY", autoCapitalize: "none" },
+  {
+    key: "type",
+    label: "Event type",
+    placeholder: "Select event type",
+    kind: "select",
+    options: ["Wedding", "Birthday", "Graduation", "Concert", "Sports", "Corporate", "Other"],
+  },
+  { key: "event_date", label: "Date", placeholder: "Select event date", kind: "date" },
   { key: "password", label: "Guest password", placeholder: "Guest password", secure: true },
   { key: "venue_name", label: "Venue", placeholder: "Venue name", autoCapitalize: "words" },
   { key: "street", label: "Street", placeholder: "123 Main St", autoCapitalize: "words" },
@@ -73,6 +81,17 @@ const CREATE_EVENT_FIELDS: FormField[] = [
 ];
 
 function parseEventDate(value: string) {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.trim());
+  if (iso) {
+    const year = Number(iso[1]);
+    const month = Number(iso[2]);
+    const day = Number(iso[3]);
+    const date = new Date(year, month - 1, day);
+    if (date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day) {
+      return value.trim();
+    }
+    return null;
+  }
   const match = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(value.trim());
   if (!match) return null;
   const month = Number(match[1]);
@@ -218,9 +237,14 @@ function EditEventModal({
             <Text style={styles.inputLabel}>EVENT NAME</Text>
             <TextInput style={styles.input} value={name} onChangeText={setName} placeholderTextColor={c.textMuted} autoCorrect={false} />
             <Text style={styles.inputLabel}>TYPE</Text>
-            <TextInput style={styles.input} value={type} onChangeText={setType} placeholderTextColor={c.textMuted} autoCorrect={false} />
-            <Text style={styles.inputLabel}>DATE (YYYY-MM-DD)</Text>
-            <TextInput style={styles.input} value={date} onChangeText={setDate} placeholder="2026-07-20" placeholderTextColor={c.textMuted} autoCorrect={false} />
+            <SelectField
+              value={type}
+              onChange={setType}
+              placeholder="Select event type"
+              options={["Wedding", "Birthday", "Graduation", "Concert", "Sports", "Corporate", "Other"]}
+            />
+            <Text style={styles.inputLabel}>DATE</Text>
+            <CalendarDateField value={date} onChange={setDate} placeholder="Select event date" />
             <Text style={styles.inputLabel}>STATUS</Text>
             <View style={styles.statusWrap}>
               {(["active", "inactive", "completed", "cancelled", "hide"] as const).map((option) => (

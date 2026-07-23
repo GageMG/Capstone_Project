@@ -25,7 +25,10 @@ import { useTheme } from "@/theme/ThemeContext";
 
 type Guest = { guest_id: number; display_name: string };
 type GuestSessionResponse = { guest: Guest };
-type UploadResponse = { uploaded: number; results?: Array<{ error?: string; reason?: string }> };
+type UploadResponse = {
+  uploaded: number;
+  results?: Array<{ file_name?: string; status?: string; error?: string; reason?: string }>;
+};
 type QRValidationResponse = {
   valid: boolean;
   event_name?: string | null;
@@ -59,6 +62,8 @@ type PickedMedia = {
   mediaType: "photo" | "video";
   file?: File;
 };
+
+const UPLOAD_BATCH_SIZE = 20;
 
 const MIME_BY_EXTENSION: Record<string, string> = {
   jpg: "image/jpeg",
@@ -117,6 +122,7 @@ export default function GuestUploadScreen() {
   const [joining, setJoining] = useState(false);
   const [mediaItems, setMediaItems] = useState<PickedMedia[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [canUpload, setCanUpload] = useState(true);
   const [uploadUnavailableReason, setUploadUnavailableReason] = useState<string | null>(null);
   const [albumPhotos, setAlbumPhotos] = useState<GuestAlbumPhoto[]>([]);
@@ -236,7 +242,7 @@ export default function GuestUploadScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.All,
       allowsMultipleSelection: true,
-      selectionLimit: 20,
+      selectionLimit: 0,
       quality: 0.85,
     });
     if (result.canceled) return;
@@ -272,55 +278,73 @@ export default function GuestUploadScreen() {
   const upload = async () => {
     if (!guest || mediaItems.length === 0) return;
     setUploading(true);
+    setUploadProgress(`0/${mediaItems.length}`);
+    const completedIds = new Set<string>();
+    let totalUploaded = 0;
     try {
-      const form = new FormData();
-      form.append("eventID", String(eventId));
-      form.append("qrToken", qrToken);
-      form.append("guestID", String(guest.guest_id));
-      for (const item of mediaItems) {
-        if (Platform.OS === "web") {
-          let file: Blob;
-          if (item.file) {
-            file = item.file.type === item.mimeType
-              ? item.file
-              : item.file.slice(0, item.file.size, item.mimeType);
+      for (let start = 0; start < mediaItems.length; start += UPLOAD_BATCH_SIZE) {
+        const batch = mediaItems.slice(start, start + UPLOAD_BATCH_SIZE);
+        const form = new FormData();
+        form.append("eventID", String(eventId));
+        form.append("qrToken", qrToken);
+        form.append("guestID", String(guest.guest_id));
+
+        for (const item of batch) {
+          if (Platform.OS === "web") {
+            let file: Blob;
+            if (item.file) {
+              file = item.file.type === item.mimeType
+                ? item.file
+                : item.file.slice(0, item.file.size, item.mimeType);
+            } else {
+              const response = await fetch(item.uri);
+              if (!response.ok) throw new Error(`Could not read ${item.name}.`);
+              const blob = await response.blob();
+              file = blob.type === item.mimeType
+                ? blob
+                : blob.slice(0, blob.size, item.mimeType);
+            }
+            form.append("files", file, item.name);
           } else {
-            const response = await fetch(item.uri);
-            if (!response.ok) throw new Error(`Could not read ${item.name}.`);
-            const blob = await response.blob();
-            file = blob.type === item.mimeType
-              ? blob
-              : blob.slice(0, blob.size, item.mimeType);
+            form.append("files", {
+              uri: item.uri,
+              name: item.name,
+              type: item.mimeType,
+            } as any);
           }
-          form.append("files", file, item.name);
-        } else {
-          form.append("files", {
-            uri: item.uri,
-            name: item.name,
-            type: item.mimeType,
-          } as any);
         }
+
+        const result = await apiPublicUpload<UploadResponse>("/upload/guest", form);
+        totalUploaded += result.uploaded;
+        const resultsByName = new Map(result.results?.map((item) => [item.file_name, item]) ?? []);
+        batch.forEach((item) => {
+          const fileResult = resultsByName.get(item.name);
+          if (fileResult?.status === "saved" || (!result.results && result.uploaded === batch.length)) {
+            completedIds.add(item.id);
+          }
+        });
+        setUploadProgress(`${Math.min(start + batch.length, mediaItems.length)}/${mediaItems.length}`);
       }
-      const result = await apiPublicUpload<UploadResponse>("/upload/guest", form);
-      if (result.uploaded < 1) {
-        throw new Error(
-          result.results?.find((item) => item.error || item.reason)?.error ??
-            result.results?.find((item) => item.reason)?.reason ??
-            "The server did not accept any files."
-        );
-      }
-      setMediaItems([]);
+
+      const failedCount = mediaItems.length - completedIds.size;
+      setMediaItems((current) => current.filter((item) => !completedIds.has(item.id)));
       Alert.alert(
-        "Upload complete",
-        `${result.uploaded} file${result.uploaded === 1 ? "" : "s"} added to the event.`
+        failedCount === 0 ? "Upload complete" : "Upload partially complete",
+        `${totalUploaded} file${totalUploaded === 1 ? "" : "s"} added to the event.${
+          failedCount ? ` ${failedCount} file${failedCount === 1 ? "" : "s"} remain selected.` : ""
+        }`
       );
     } catch (caught) {
+      setMediaItems((current) => current.filter((item) => !completedIds.has(item.id)));
       Alert.alert(
-        "Upload failed",
-        caught instanceof Error ? caught.message : "Please try again."
+        totalUploaded > 0 ? "Upload stopped" : "Upload failed",
+        `${totalUploaded > 0 ? `${totalUploaded} files uploaded before the error. ` : ""}${
+          caught instanceof Error ? caught.message : "Please try again."
+        }`
       );
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -520,7 +544,7 @@ export default function GuestUploadScreen() {
                 ) : (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>Welcome, {guest.display_name}</Text>
-                    <Text style={styles.cardCopy}>Choose up to 20 photos or videos from your device.</Text>
+                    <Text style={styles.cardCopy}>Choose multiple photos or videos. Large selections upload in batches of 20.</Text>
                     <TouchableOpacity style={styles.pickerButton} onPress={() => void chooseMedia()}>
                       <Ionicons name="images-outline" size={22} color={c.accent} />
                       <Text style={styles.pickerText}>
@@ -547,7 +571,10 @@ export default function GuestUploadScreen() {
                           onPress={() => void upload()}
                         >
                           {uploading ? (
-                            <ActivityIndicator color="#fff" />
+                            <>
+                              <ActivityIndicator color="#fff" />
+                              <Text style={styles.primaryText}>UPLOADING {uploadProgress ?? "…"}</Text>
+                            </>
                           ) : (
                             <Text style={styles.primaryText}>UPLOAD MEDIA</Text>
                           )}
@@ -638,7 +665,7 @@ const makeStyles = (c: ThemeColors) =>
     cardCopy: { color: c.textMuted, marginBottom: 16 },
     inputLabel: { color: c.accent, fontSize: 10, fontWeight: "700", letterSpacing: 1.4, marginTop: 14, marginBottom: 7 },
     input: { height: 50, backgroundColor: c.bg, borderWidth: 1, borderColor: c.border, borderRadius: 12, color: c.textPrimary, paddingHorizontal: 14 },
-    primaryButton: { height: 52, borderRadius: 12, backgroundColor: c.accentStrong, alignItems: "center", justifyContent: "center", marginTop: 20 },
+    primaryButton: { height: 52, borderRadius: 12, backgroundColor: c.accentStrong, flexDirection: "row", gap: 8, alignItems: "center", justifyContent: "center", marginTop: 20 },
     primaryText: { color: "#fff", fontWeight: "800", letterSpacing: 1.7, fontSize: 12 },
     disabled: { opacity: 0.6 },
     errorCard: { width: "100%", maxWidth: 540, alignItems: "center", gap: 10, borderWidth: 1, borderColor: c.danger, borderRadius: 16, padding: 22, backgroundColor: c.surface },
