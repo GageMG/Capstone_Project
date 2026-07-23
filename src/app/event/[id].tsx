@@ -39,6 +39,7 @@ type EventInfo = {
 type MediaItem = {
   id: number;
   display_url: string | null;
+  thumbnail_url?: string | null;
   original_file_name: string | null;
   title?: string | null;
   duration_seconds?: number | null;
@@ -59,6 +60,7 @@ type EventPhoto = LightboxPhoto & {
 type UploadedVideo = {
   id: string;
   uri: string;
+  thumbnailUri: string | null;
   title: string;
   durationSeconds: number | null;
 };
@@ -221,6 +223,7 @@ function mapUploadedVideos(items: MediaItem[]): UploadedVideo[] {
     .map((video) => ({
       id: String(video.id),
       uri: video.display_url as string,
+      thumbnailUri: video.thumbnail_url ?? null,
       title:
         video.title ||
         video.original_file_name ||
@@ -884,11 +887,12 @@ export default function EventDetailScreen() {
             )
           ) : mediaTab === "videos" ? (
             <FlatList
-              key="videos"
+              key="videos-grid"
               data={videos}
+              numColumns={NUM_COLS}
               keyExtractor={(item) => item.id}
               contentContainerStyle={[
-                s.videoList,
+                s.grid,
                 videos.length === 0 && s.emptyList,
               ]}
               onEndReached={() => void loadMoreVideos()}
@@ -912,45 +916,60 @@ export default function EventDetailScreen() {
                 </View>
               }
               renderItem={({ item }) => (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => setSelectedVideo(item)}
+                <View
                   style={[
-                    s.videoRow,
-                    { backgroundColor: c.surface, borderColor: c.border },
+                    s.videoThumbnailCell,
+                    {
+                      width: photoCellSize,
+                      height: photoCellSize,
+                      backgroundColor: c.surface,
+                    },
                   ]}
                 >
-                  <View
-                    style={[
-                      s.videoIcon,
-                      { backgroundColor: c.accentStrong },
-                    ]}
-                  >
-                    <Ionicons name="play" size={24} color="#fff" />
-                  </View>
-                  <View style={s.videoInfo}>
-                    <Text numberOfLines={1} style={s.videoTitle}>
-                      {item.title}
-                    </Text>
-                    <Text style={s.videoMeta}>
-                      {formatDuration(item.durationSeconds)}
-                    </Text>
-                  </View>
                   <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setSelectedVideo(item)}
+                    style={StyleSheet.absoluteFill}
+                  >
+                    {item.thumbnailUri ? (
+                      <Image
+                        source={{ uri: item.thumbnailUri }}
+                        style={s.videoThumbnailImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={s.videoThumbnailFallback}>
+                        <Ionicons
+                          name="videocam-outline"
+                          size={30}
+                          color={c.textFaint}
+                        />
+                      </View>
+                    )}
+                    <View style={s.videoPlayBadge}>
+                      <Ionicons name="play" size={22} color="#fff" />
+                    </View>
+                    <View style={s.videoThumbnailFooter}>
+                      <Text numberOfLines={1} style={s.videoThumbnailTitle}>
+                        {item.title}
+                      </Text>
+                      <Text style={s.videoThumbnailDuration}>
+                        {formatDuration(item.durationSeconds)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.photoMenuButton}
                     accessibilityLabel="Video options"
-                    onPress={(event) => {
-                      event.stopPropagation();
-                      setVideoToDelete(item);
-                    }}
-                    hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                    onPress={() => setVideoToDelete(item)}
                   >
                     <Ionicons
                       name="ellipsis-horizontal"
-                      size={22}
-                      color={c.textFaint}
+                      size={20}
+                      color="#fff"
                     />
                   </TouchableOpacity>
-                </TouchableOpacity>
+                </View>
               )}
             />
           ) : (
@@ -1534,6 +1553,58 @@ const makeStyles = (c: ThemeColors) =>
       fontWeight: "700",
     },
     videoMeta: { color: c.textMuted, fontSize: 12, marginTop: 4 },
+    videoThumbnailCell: {
+      padding: 1,
+      overflow: "hidden",
+    },
+    videoThumbnailImage: {
+      width: "100%",
+      height: "100%",
+      borderRadius: 4,
+    },
+    videoThumbnailFallback: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    videoPlayBadge: {
+      position: "absolute",
+      top: "50%",
+      left: "50%",
+      width: 46,
+      height: 46,
+      marginLeft: -23,
+      marginTop: -23,
+      paddingLeft: 3,
+      borderRadius: 23,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(5,8,16,0.72)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.7)",
+    },
+    videoThumbnailFooter: {
+      position: "absolute",
+      right: 1,
+      bottom: 1,
+      left: 1,
+      paddingTop: 18,
+      paddingHorizontal: 8,
+      paddingBottom: 7,
+      backgroundColor: "rgba(5,8,16,0.68)",
+    },
+    videoThumbnailTitle: {
+      color: "#fff",
+      fontSize: 11,
+      fontWeight: "700",
+      paddingRight: 4,
+    },
+    videoThumbnailDuration: {
+      color: "rgba(255,255,255,0.82)",
+      fontSize: 10,
+      fontWeight: "600",
+      marginTop: 2,
+    },
     errorBox: {
       alignItems: "center",
       marginTop: 48,

@@ -333,7 +333,7 @@ class StoryBoardGen():
                     "days_from_event": (clipTime - eventDate).total_seconds() / 86400.0,
                     "clip_start_seconds": clipStart,
                     "clip_end_seconds": clipEnd,
-                    "duration_seconds": clipEnd - clipStart,
+                    "duration_seconds": videoDuration,
                     "selection_score": frame["selection_score"],
                     "score_breakdown": frame["score_breakdown"],
                     "scene_label": sceneLabel,
@@ -441,6 +441,18 @@ class StoryBoardGen():
             return None
 
         storyboardItems = [ds.StoryboardItemData.fromRow(row).toDict() for row in selectedMedia]
+        estimatedDuration = sum(
+            (
+                max(
+                    0.0,
+                    self.makeFloat(item.get("clip_end_seconds"))
+                    - self.makeFloat(item.get("clip_start_seconds")),
+                )
+                if item.get("source_type") == "video"
+                else max(0.0, self.makeFloat(item.get("duration_seconds")))
+            )
+            for item in storyboardItems
+        )
         storyboardData = {
             "video_type": videoType,
             "content_type": profile["content_type"],
@@ -448,7 +460,7 @@ class StoryBoardGen():
             "mood": profile["mood"],
             "timing_preference": profile["timing_preference"],
             "target_duration_seconds": targetDuration,
-            "estimated_duration_seconds": sum(item["duration_seconds"] for item in storyboardItems),
+            "estimated_duration_seconds": estimatedDuration,
             "window_start": windowStart.isoformat(),
             "event_date": eventDate.isoformat(),
             "photo_count": min(len(photos), photoLimit),

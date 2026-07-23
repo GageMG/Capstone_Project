@@ -235,6 +235,14 @@ def userOwnsLocation(location: dict, current_user_id: int) -> bool:
     owner_id = event.get("user_id") or event.get("owner_id")
     return owner_id == current_user_id
 
+def blobNameFromStoredPath(storedPath: str | None) -> str | None:
+    if not storedPath:
+        return None
+
+    path = unquote(urlparse(storedPath).path).lstrip("/")
+    containerPrefix = f"{blob.container}/"
+    return path[len(containerPrefix):] if path.startswith(containerPrefix) else path
+
 def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
     upload = item.get("uploads") or {}
     guest = upload.get("guests") or None
@@ -284,6 +292,10 @@ def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
             "image_hash": item.get("image_hash"),
         })
     else:
+        signed_thumbnail = blob.getSignedBlobUrl(
+            blobNameFromStoredPath(item.get("thumbnail_path")),
+            expiresInMinutes=15,
+        )
         normalized.update({
             "title": item.get("title"),
             "status": item.get("status"),
@@ -291,6 +303,8 @@ def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
             "width": item.get("width"),
             "height": item.get("height"),
             "fps": item.get("fps"),
+            "thumbnail_url": signed_thumbnail["url"] if signed_thumbnail else None,
+            "thumbnail_url_expires_at": signed_thumbnail["expires_at"] if signed_thumbnail else None,
             "last_updated": item.get("last_updated"),
         })
 
