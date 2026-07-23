@@ -2955,8 +2955,8 @@ class MediaMappingConfig:
     }
 
     TIMING_SETTINGS: dict[str, dict[str, float]] = {
-        "slow": {"photo_seconds": 6.0, "video_clip_seconds": 30.0},
-        "medium": {"photo_seconds": 4.0, "video_clip_seconds": 22.0},
-        "fast": {"photo_seconds": 2.5, "video_clip_seconds": 15.0},
-        "unknown": {"photo_seconds": 4.0, "video_clip_seconds": 22.0},
+        "slow": {"photo_seconds": 7.0, "video_clip_seconds": 30.0},
+        "medium": {"photo_seconds": 5.0, "video_clip_seconds": 22.0},
+        "fast": {"photo_seconds": 3.5, "video_clip_seconds": 15.0},
+        "unknown": {"photo_seconds": 5.0, "video_clip_seconds": 22.0},
     }

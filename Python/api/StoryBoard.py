@@ -386,7 +386,7 @@ class StoryBoardGen():
             profile["timing_preference"],
             ds.MediaMappingConfig.TIMING_SETTINGS["unknown"],
         )
-        photoSeconds = self.makeFloat(timing.get("photo_seconds"), 4.0)
+        photoSeconds = self.makeFloat(timing.get("photo_seconds"), 5.0)
         clipSeconds = min(max(self.makeFloat(timing.get("video_clip_seconds"), 22.0), 15.0), 30.0)
 
         music = self.selectMusic(profile, self.db.getActiveMusic() or [])

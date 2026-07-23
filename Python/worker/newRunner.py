@@ -233,8 +233,14 @@ class newRunner:
                     if not sb:
                         raise ValueError(f"No approved storyboard photos found for event {eventID}")
                     music = self.db.getMusicByID(storyboard.get("music_id"))
-                    package = {"storyboard": storyboard, "items": sb, "music": music}
-                    videoPath = self.ss.generateVideo(package , eventID)    
+                    event = self.db.getEventByID(eventID)
+                    package = {
+                        "storyboard": storyboard,
+                        "items": sb,
+                        "music": music,
+                        "event": event or {},
+                    }
+                    videoPath = self.ss.generateVideo(package, eventID)
 
                     self.log.info(f"Video created successfully: {videoPath}")
 
