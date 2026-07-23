@@ -31,3 +31,4 @@ timm
 
 # Video
 moviepy
+imageio-ffmpeg

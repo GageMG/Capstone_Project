@@ -16,6 +16,7 @@ from worker.PreFilter import ImgQualFilt
 from worker.SlideShow import SlideShowGenerator
 from api.StoryBoard import StoryBoardGen
 from worker.VideoExtraction import ExtractVidFrames
+from worker.VideoMetadata import VideoMetadataProcessor
 
 register_heif_opener(thumbnails=False)
 
@@ -57,6 +58,7 @@ class newRunner:
         self.ir = blipRanker(db= self.db, log=self.log)
         self.pf = ImgQualFilt(db= self.db, log= self.log)
         self.ve = ExtractVidFrames(db= self.db, log= self.log)
+        self.vm = VideoMetadataProcessor(db=self.db, log=self.log, blob=self.blob)
         self.ss = SlideShowGenerator(db=self.db, log= self.log, azure= self.blob)
         self.sb = StoryBoardGen(db=self.db, log=self.log)
 
@@ -258,6 +260,28 @@ class newRunner:
 
                 if dt == 'videos':
                     videoFlag = 'videos'
+                    metadataResults = self.vm.batchRun(videos=mediaSet, eventID=eventID)
+                    self.log.info("Video metadata results: %s", metadataResults)
+                    retryableMetadataFailures = [
+                        row for row in metadataResults.get("failed", [])
+                        if not row.get("hidden")
+                    ]
+                    if retryableMetadataFailures:
+                        raise RuntimeError(
+                            f"Video metadata processing failed: {retryableMetadataFailures}"
+                        )
+                    hiddenVideoIDs = {
+                        row.get("video_id")
+                        for row in metadataResults.get("failed", [])
+                        if row.get("hidden")
+                    }
+                    mediaSet = [
+                        video for video in mediaSet
+                        if video.get("video_id") not in hiddenVideoIDs
+                    ]
+                    if not mediaSet:
+                        self.log.warning("All videos in this job were unreadable and have been hidden.")
+                        return {"Video metadata": metadataResults}
                     mediaSet = self.ve.batchRun(videos=mediaSet, tempDir=tempDir, eventID=eventID)
                     dt = 'video_frames'
 

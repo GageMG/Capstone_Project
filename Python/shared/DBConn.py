@@ -699,6 +699,9 @@ class SQLbuilder:
             if uploadIDs:
                 query = query.in_("upload_id", uploadIDs)
 
+            if mediaType == "videos":
+                query = query.or_("hide_video.eq.false,hide_video.is.null")
+
             result = query.execute()
                 
             rows = result.data or []
@@ -726,7 +729,88 @@ class SQLbuilder:
         except Exception as e:
             self.log.exception(f"Error occurred getting {mediaType}: {e}")
             return []
-        
+
+    def updateVideoMetadata(self, eventID: int, videoID: int, metadata: dict):
+        if not eventID or not videoID or not metadata:
+            return None
+
+        values = {
+            "duration_seconds": metadata.get("duration_seconds"),
+            "width": metadata.get("width"),
+            "height": metadata.get("height"),
+            "fps": metadata.get("fps"),
+            "thumbnail_path": metadata.get("thumbnail_path"),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+        if metadata.get("video_original_date"):
+            values["video_original_date"] = metadata["video_original_date"]
+
+        values = {key: value for key, value in values.items() if value is not None}
+
+        try:
+            result = (
+                self.client
+                .table("videos")
+                .update(values)
+                .eq("video_id", videoID)
+                .eq("event_id", eventID)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as error:
+            self.log.exception(
+                "Could not update metadata for video_id=%s event_id=%s: %s",
+                videoID,
+                eventID,
+                error,
+            )
+            return None
+
+    def getVideosForMetadataBackfill(self, offset: int = 0, limit: int = 100, videoID: int | None = None):
+        offset = max(int(offset or 0), 0)
+        limit = min(max(int(limit or 100), 1), 1000)
+
+        try:
+            query = (
+                self.client
+                .table("videos")
+                .select("""
+                    video_id,
+                    event_id,
+                    upload_id,
+                    duration_seconds,
+                    width,
+                    height,
+                    fps,
+                    thumbnail_path,
+                    video_original_date,
+                    uploads!inner(
+                        blob_name,
+                        file_path,
+                        original_file_name
+                    )
+                """)
+                .order("video_id")
+                .range(offset, offset + limit - 1)
+            )
+            if videoID is not None:
+                query = query.eq("video_id", int(videoID))
+
+            result = query.execute()
+            rows = []
+            for row in result.data or []:
+                upload = row.pop("uploads", None) or {}
+                if isinstance(upload, list):
+                    upload = upload[0] if upload else {}
+                row["blob_name"] = upload.get("blob_name")
+                row["file_path"] = upload.get("file_path")
+                row["original_file_name"] = upload.get("original_file_name")
+                rows.append(row)
+            return rows
+        except Exception as error:
+            self.log.exception("Could not load videos for metadata backfill: %s", error)
+            return []
+
     def insertPromptRequest(self, promptData: dict):
 
         if not promptData:
@@ -2403,6 +2487,30 @@ class SQLbuilder:
         if not eventID or not photoID:
             return None
 
+        try:
+            result = (
+                self.client
+                .table("photos")
+                .update({
+                    "hide_photo": True,
+                    "last_edit": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("photo_id", photoID)
+                .eq("event_id", eventID)
+                .or_("hide_photo.eq.false,hide_photo.is.null")
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception:
+            self.log.exception(
+                "Could not hide photo_id=%s for event_id=%s",
+                photoID,
+                eventID,
+            )
+            return None
+
     def hideVideo(self, eventID: int, videoID: int):
         if not eventID or not videoID:
             return None
@@ -2417,7 +2525,7 @@ class SQLbuilder:
                 })
                 .eq("video_id", videoID)
                 .eq("event_id", eventID)
-                .eq("hide_video", False)
+                .or_("hide_video.eq.false,hide_video.is.null")
                 .execute()
             )
 
@@ -2427,32 +2535,6 @@ class SQLbuilder:
             self.log.exception(
                 "Could not hide video_id=%s for event_id=%s",
                 videoID,
-                eventID,
-            )
-            return None
-
-        try:
-            result = (
-                self.client
-                .table("photos")
-                .update({
-                    "hide_photo": True,
-                    "last_edit": (
-                        datetime.now(timezone.utc).isoformat()
-                    ),
-                })
-                .eq("photo_id", photoID)
-                .eq("event_id", eventID)
-                .eq("hide_photo", False)
-                .execute()
-            )
-
-            return result.data[0] if result.data else None
-
-        except Exception:
-            self.log.exception(
-                "Could not hide photo_id=%s for event_id=%s",
-                photoID,
                 eventID,
             )
             return None
