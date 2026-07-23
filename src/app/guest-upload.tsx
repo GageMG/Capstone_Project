@@ -544,7 +544,7 @@ export default function GuestUploadScreen() {
                 ) : (
                   <View style={styles.card}>
                     <Text style={styles.cardTitle}>Welcome, {guest.display_name}</Text>
-                    <Text style={styles.cardCopy}>Choose multiple photos or videos. Large selections upload in batches of 20.</Text>
+                    <Text style={styles.cardCopy}>Choose photos or videos from your device.</Text>
                     <TouchableOpacity style={styles.pickerButton} onPress={() => void chooseMedia()}>
                       <Ionicons name="images-outline" size={22} color={c.accent} />
                       <Text style={styles.pickerText}>

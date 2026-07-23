@@ -1136,6 +1136,25 @@ def hideEventPhoto(eventID: int,photoID: int,current_user_id: int = Depends(getC
         "hidden": True,
     }
 
+@app.delete("/events/{eventID}/videos/{videoID}")
+def hideEventVideo(eventID: int,videoID: int,current_user_id: int = Depends(getCurrentUserID)):
+    verifyEventOwner(eventID, current_user_id)
+
+    hidden = db.hideVideo(
+        eventID=eventID,
+        videoID=videoID,
+    )
+
+    if not hidden:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Video was not found or is already hidden.")
+
+    return {
+        "message": "Video removed from the gallery.",
+        "event_id": eventID,
+        "video_id": videoID,
+        "hidden": True,
+    }
+
 @app.patch("/events/{eventID}/photos/{photoID}/slideshow")
 def updatePhotoSlideshowPreference(eventID: int,photoID: int,preference: dc.photoSlideshowAction,current_user_id: int = Depends(getCurrentUserID)):
     verifyEventOwner(eventID, current_user_id)

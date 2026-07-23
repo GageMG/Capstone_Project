@@ -386,6 +386,8 @@ export default function EventDetailScreen() {
     "photos" | "videos" | "generated"
   >("photos");
   const [selectedVideo, setSelectedVideo] = useState<UploadedVideo | null>(null);
+  const [videoToDelete, setVideoToDelete] = useState<UploadedVideo | null>(null);
+  const [deletingVideo, setDeletingVideo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -460,6 +462,36 @@ export default function EventDetailScreen() {
       );
     } finally {
       setDeletingPhoto(false);
+    }
+  };
+
+  const deleteVideo = async () => {
+    if (!id || !videoToDelete || deletingVideo) return;
+
+    const selectedVideoId = videoToDelete.id;
+    setDeletingVideo(true);
+    try {
+      await apiFetch(
+        `/events/${id}/videos/${selectedVideoId}`,
+        undefined,
+        "DELETE"
+      );
+      setVideos((current) =>
+        current.filter((video) => video.id !== selectedVideoId)
+      );
+      setVideoTotal((current) => Math.max(0, current - 1));
+      setVideoOffset((current) => Math.max(0, current - 1));
+      setSelectedVideo((current) =>
+        current?.id === selectedVideoId ? null : current
+      );
+      setVideoToDelete(null);
+    } catch (caught) {
+      Alert.alert(
+        "Could Not Remove Video",
+        caught instanceof Error ? caught.message : "Please try again."
+      );
+    } finally {
+      setDeletingVideo(false);
     }
   };
 
@@ -904,11 +936,20 @@ export default function EventDetailScreen() {
                       {formatDuration(item.durationSeconds)}
                     </Text>
                   </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={c.textFaint}
-                  />
+                  <TouchableOpacity
+                    accessibilityLabel="Video options"
+                    onPress={(event) => {
+                      event.stopPropagation();
+                      setVideoToDelete(item);
+                    }}
+                    hitSlop={{ top: 10, right: 10, bottom: 10, left: 10 }}
+                  >
+                    <Ionicons
+                      name="ellipsis-horizontal"
+                      size={22}
+                      color={c.textFaint}
+                    />
+                  </TouchableOpacity>
                 </TouchableOpacity>
               )}
             />
@@ -1161,6 +1202,48 @@ export default function EventDetailScreen() {
                 onPress={() => void deletePhoto()}
               >
                 {deletingPhoto ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={s.confirmDeleteText}>Remove</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={videoToDelete !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !deletingVideo && setVideoToDelete(null)}
+      >
+        <View style={s.deleteBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => !deletingVideo && setVideoToDelete(null)}
+          />
+          <View style={s.deleteCard}>
+            <View style={s.deleteIcon}>
+              <Ionicons name="trash-outline" size={25} color={c.danger} />
+            </View>
+            <Text style={s.deleteTitle}>Remove this video?</Text>
+            <Text style={s.deleteCopy}>
+              It will be hidden from the gallery. The original file will not be deleted.
+            </Text>
+            <View style={s.deleteActions}>
+              <TouchableOpacity
+                style={s.cancelDeleteButton}
+                disabled={deletingVideo}
+                onPress={() => setVideoToDelete(null)}
+              >
+                <Text style={s.cancelDeleteText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.confirmDeleteButton}
+                disabled={deletingVideo}
+                onPress={() => void deleteVideo()}
+              >
+                {deletingVideo ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={s.confirmDeleteText}>Remove</Text>

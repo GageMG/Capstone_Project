@@ -512,7 +512,7 @@ export default function UploadScreen() {
             </View>
             <Text style={s.dropTitle}>Choose Photos or Videos</Text>
             <Text style={s.dropSub}>
-              Tap to browse your device library{"\n"}Large selections upload in batches of 20
+              Tap to browse your device library
             </Text>
             <View style={s.selectBadge}>
               <Ionicons name="add" size={14} color="#fff" />

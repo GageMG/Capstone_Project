@@ -2403,6 +2403,34 @@ class SQLbuilder:
         if not eventID or not photoID:
             return None
 
+    def hideVideo(self, eventID: int, videoID: int):
+        if not eventID or not videoID:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("videos")
+                .update({
+                    "hide_video": True,
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("video_id", videoID)
+                .eq("event_id", eventID)
+                .eq("hide_video", False)
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception:
+            self.log.exception(
+                "Could not hide video_id=%s for event_id=%s",
+                videoID,
+                eventID,
+            )
+            return None
+
         try:
             result = (
                 self.client
