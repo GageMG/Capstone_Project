@@ -1,6 +1,7 @@
 import math
 import os
 import re
+import subprocess
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
@@ -8,6 +9,7 @@ from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import cv2 as cv
+import imageio_ffmpeg
 import numpy as np
 from moviepy import AudioFileClip, VideoFileClip, concatenate_audioclips
 
@@ -114,16 +116,78 @@ class SlideShowGenerator:
             writer.write(displayFrame)
         return totalFrames
 
+    def normalizeVideoForDecoding(self, videoPath):
+        sourcePath = Path(videoPath)
+        normalizedPath = sourcePath.with_name(
+            f"{sourcePath.stem}_{uuid4().hex[:8]}_normalized.mp4"
+        )
+        videoFilter = (
+            f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+            f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"setsar=1,fps={self.fps}"
+        )
+        command = [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-y",
+            "-i", str(sourcePath),
+            "-map", "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata", "-1",
+            "-vf", videoFilter,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(normalizedPath),
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        if completed.returncode != 0:
+            details = (completed.stderr or completed.stdout or "").strip()
+            raise ValueError(
+                f"FFmpeg could not normalize video clip {sourcePath.name}: "
+                f"{details[-2000:]}"
+            )
+        if not normalizedPath.is_file() or normalizedPath.stat().st_size == 0:
+            raise ValueError(
+                f"FFmpeg did not create a normalized video for {sourcePath.name}."
+            )
+        return normalizedPath
+
     def writeVideoSegment(self, writer, videoPath, startSec=0, endSec=None,durationSeconds=None, sceneLabel=None, reason=None):
         clip = None
+        normalizedPath = None
         try:
             clip = VideoFileClip(str(videoPath), audio=False)
-        except Exception as error:
-            raise ValueError(f"Could not open video clip: {videoPath}") from error
+        except Exception as firstError:
+            self.log.warning(
+                "MoviePy could not open %s directly; normalizing its video stream: %s",
+                Path(videoPath).name,
+                firstError,
+            )
+            try:
+                normalizedPath = self.normalizeVideoForDecoding(videoPath)
+                clip = VideoFileClip(str(normalizedPath), audio=False)
+            except Exception as fallbackError:
+                if normalizedPath is not None:
+                    normalizedPath.unlink(missing_ok=True)
+                raise ValueError(
+                    f"Could not open video clip after normalization: {videoPath}"
+                ) from fallbackError
 
         sourceDuration = self.positiveFloat(clip.duration, 0.0)
         if sourceDuration <= 0:
             clip.close()
+            if normalizedPath is not None:
+                normalizedPath.unlink(missing_ok=True)
             raise ValueError(f"Video clip has no playable duration: {videoPath}")
 
         try:
@@ -145,6 +209,8 @@ class SlideShowGenerator:
         if not math.isfinite(end) or end <= start:
             if clip is not None:
                 clip.close()
+            if normalizedPath is not None:
+                normalizedPath.unlink(missing_ok=True)
             return 0
 
         outputFrames = max(int(round((end - start) * self.fps)), 1)
@@ -168,6 +234,8 @@ class SlideShowGenerator:
         finally:
             if clip is not None:
                 clip.close()
+            if normalizedPath is not None:
+                normalizedPath.unlink(missing_ok=True)
         return framesWritten
 
     @staticmethod
