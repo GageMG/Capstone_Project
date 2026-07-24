@@ -1,4 +1,15 @@
-export const API_URL = (process.env.EXPO_PUBLIC_API_URL ?? "https://csi4999-api-h4exhuc3b3btafg3.eastus-01.azurewebsites.net/").replace(/\/+$/, "");
+const apiURL = process.env.EXPO_PUBLIC_API_URL?.trim();
+
+export const API_URL = apiURL ? apiURL.replace(/\/+$/, "") : "";
+export const API_CONFIGURED = API_URL.length > 0;
+
+const apiEndpoint = (path: string) => {
+  if (!API_CONFIGURED) {
+    throw new Error("The server connection is not configured. Please try again later.");
+  }
+
+  return `${API_URL}${path.startsWith("/") ? path : `/${path}`}`;
+};
 
 let token = process.env.EXPO_PUBLIC_JWT_TOKEN ?? "";
 
@@ -53,7 +64,7 @@ export async function apiFetch<T = any>(
   method: string = body === undefined ? "GET" : "POST",
   signal?: AbortSignal
 ): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(apiEndpoint(path), {
     method,
     headers: { "Content-Type": "application/json", ...authHeaders() },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -68,7 +79,7 @@ export async function apiPublicFetch<T = any>(
   method: string = body === undefined ? "GET" : "POST",
   signal?: AbortSignal
 ): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(apiEndpoint(path), {
     method,
     headers: { "Content-Type": "application/json" },
     body: body === undefined ? undefined : JSON.stringify(body),
@@ -78,10 +89,21 @@ export async function apiPublicFetch<T = any>(
 }
 
 export async function apiUpload<T = any>(path: string, form: FormData): Promise<T> {
-  const res = await fetch(`${API_URL}${path}`, {
+  const res = await fetch(apiEndpoint(path), {
     method: "POST",
     headers: authHeaders(),
     body: form,
   });
   return parse<T>(res);
+}
+
+export async function apiPublicUpload<T = any>(
+  path: string,
+  form: FormData
+): Promise<T> {
+  const res = await fetch(apiEndpoint(path), {
+    method: "POST",
+    body: form,
+  });
+  return parse<T>(res, false);
 }

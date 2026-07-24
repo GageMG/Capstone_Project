@@ -1,5 +1,6 @@
 import { Ionicons } from "@expo/vector-icons";
 import { router, useLocalSearchParams } from "expo-router";
+import { useVideoPlayer, VideoView } from "expo-video";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
@@ -39,6 +40,7 @@ type EventInfo = {
 type MediaItem = {
   id: number;
   display_url: string | null;
+  thumbnail_url?: string | null;
   original_file_name: string | null;
   title?: string | null;
   duration_seconds?: number | null;
@@ -59,12 +61,14 @@ type EventPhoto = LightboxPhoto & {
 type UploadedVideo = {
   id: string;
   uri: string;
+  thumbnailUri: string | null;
   title: string;
   durationSeconds: number | null;
 };
 
 type GeneratedVideo = {
   id: string;
+  previewUri: string | null;
   title: string;
   durationSeconds: number | null;
 };
@@ -88,6 +92,7 @@ type GeneratedVideoRecord = {
   file_name: string | null;
   status: string;
   duration_seconds: number | null;
+  stream_url?: string | null;
 };
 
 type GeneratedVideosResponse = {
@@ -221,6 +226,7 @@ function mapUploadedVideos(items: MediaItem[]): UploadedVideo[] {
     .map((video) => ({
       id: String(video.id),
       uri: video.display_url as string,
+      thumbnailUri: video.thumbnail_url ?? null,
       title:
         video.title ||
         video.original_file_name ||
@@ -238,6 +244,32 @@ function formatDuration(seconds: number | null) {
   const minutes = Math.floor(rounded / 60);
   const remainingSeconds = rounded % 60;
   return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`;
+}
+
+function GeneratedVideoPreview({ streamUrl }: { streamUrl: string }) {
+  const player = useVideoPlayer(
+    {
+      uri: streamUrl,
+      useCaching: Platform.OS !== "web",
+    },
+    (videoPlayer) => {
+      videoPlayer.loop = false;
+      videoPlayer.muted = true;
+    }
+  );
+
+  return (
+    <View pointerEvents="none" style={StyleSheet.absoluteFill}>
+      <VideoView
+        player={player}
+        style={StyleSheet.absoluteFill}
+        nativeControls={false}
+        contentFit="cover"
+        playsInline
+        crossOrigin="anonymous"
+      />
+    </View>
+  );
 }
 
 function UploadedVideoModal({
@@ -386,6 +418,8 @@ export default function EventDetailScreen() {
     "photos" | "videos" | "generated"
   >("photos");
   const [selectedVideo, setSelectedVideo] = useState<UploadedVideo | null>(null);
+  const [videoToDelete, setVideoToDelete] = useState<UploadedVideo | null>(null);
+  const [deletingVideo, setDeletingVideo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
@@ -460,6 +494,36 @@ export default function EventDetailScreen() {
       );
     } finally {
       setDeletingPhoto(false);
+    }
+  };
+
+  const deleteVideo = async () => {
+    if (!id || !videoToDelete || deletingVideo) return;
+
+    const selectedVideoId = videoToDelete.id;
+    setDeletingVideo(true);
+    try {
+      await apiFetch(
+        `/events/${id}/videos/${selectedVideoId}`,
+        undefined,
+        "DELETE"
+      );
+      setVideos((current) =>
+        current.filter((video) => video.id !== selectedVideoId)
+      );
+      setVideoTotal((current) => Math.max(0, current - 1));
+      setVideoOffset((current) => Math.max(0, current - 1));
+      setSelectedVideo((current) =>
+        current?.id === selectedVideoId ? null : current
+      );
+      setVideoToDelete(null);
+    } catch (caught) {
+      Alert.alert(
+        "Could Not Remove Video",
+        caught instanceof Error ? caught.message : "Please try again."
+      );
+    } finally {
+      setDeletingVideo(false);
     }
   };
 
@@ -556,6 +620,7 @@ export default function EventDetailScreen() {
           )
           .map((video) => ({
             id: String(video.gen_vid_id),
+            previewUri: video.stream_url ?? null,
             title:
               video.title ||
               video.file_name ||
@@ -852,11 +917,12 @@ export default function EventDetailScreen() {
             )
           ) : mediaTab === "videos" ? (
             <FlatList
-              key="videos"
+              key="videos-grid"
               data={videos}
+              numColumns={NUM_COLS}
               keyExtractor={(item) => item.id}
               contentContainerStyle={[
-                s.videoList,
+                s.grid,
                 videos.length === 0 && s.emptyList,
               ]}
               onEndReached={() => void loadMoreVideos()}
@@ -880,77 +946,124 @@ export default function EventDetailScreen() {
                 </View>
               }
               renderItem={({ item }) => (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() => setSelectedVideo(item)}
+                <View
                   style={[
-                    s.videoRow,
-                    { backgroundColor: c.surface, borderColor: c.border },
+                    s.videoThumbnailCell,
+                    {
+                      width: photoCellSize,
+                      height: photoCellSize,
+                      backgroundColor: c.surface,
+                    },
                   ]}
                 >
-                  <View
-                    style={[
-                      s.videoIcon,
-                      { backgroundColor: c.accentStrong },
-                    ]}
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() => setSelectedVideo(item)}
+                    style={StyleSheet.absoluteFill}
                   >
-                    <Ionicons name="play" size={24} color="#fff" />
-                  </View>
-                  <View style={s.videoInfo}>
-                    <Text numberOfLines={1} style={s.videoTitle}>
-                      {item.title}
-                    </Text>
-                    <Text style={s.videoMeta}>
-                      {formatDuration(item.durationSeconds)}
-                    </Text>
-                  </View>
-                  <Ionicons
-                    name="chevron-forward"
-                    size={20}
-                    color={c.textFaint}
-                  />
-                </TouchableOpacity>
+                    {item.thumbnailUri ? (
+                      <Image
+                        source={{ uri: item.thumbnailUri }}
+                        style={s.videoThumbnailImage}
+                        resizeMode="cover"
+                      />
+                    ) : (
+                      <View style={s.videoThumbnailFallback}>
+                        <Ionicons
+                          name="videocam-outline"
+                          size={30}
+                          color={c.textFaint}
+                        />
+                      </View>
+                    )}
+                    <View style={s.videoPlayBadge}>
+                      <Ionicons name="play" size={22} color="#fff" />
+                    </View>
+                    <View style={s.videoThumbnailFooter}>
+                      <Text numberOfLines={1} style={s.videoThumbnailTitle}>
+                        {item.title}
+                      </Text>
+                      <Text style={s.videoThumbnailDuration}>
+                        {formatDuration(item.durationSeconds)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.photoMenuButton}
+                    accessibilityLabel="Video options"
+                    onPress={() => setVideoToDelete(item)}
+                  >
+                    <Ionicons
+                      name="ellipsis-horizontal"
+                      size={20}
+                      color="#fff"
+                    />
+                  </TouchableOpacity>
+                </View>
               )}
             />
           ) : (
             <FlatList
-              key="generated"
+              key="generated-grid"
               data={generatedVideos}
+              numColumns={NUM_COLS}
               keyExtractor={(item) => item.id}
-              contentContainerStyle={s.videoList}
-              renderItem={({ item }) => (
-                <TouchableOpacity
-                  activeOpacity={0.85}
-                  onPress={() =>
-                    router.push(`/events/${id}/videos/${item.id}`)
-                  }
-                  style={[
-                    s.videoRow,
-                    { backgroundColor: c.surface, borderColor: c.border },
-                  ]}
-                >
-                  <View
-                    style={[
-                      s.videoIcon,
-                      { backgroundColor: c.accentStrong },
-                    ]}
-                  >
-                    <Ionicons name="sparkles" size={24} color="#fff" />
-                  </View>
-                  <View style={s.videoInfo}>
-                    <Text numberOfLines={1} style={s.videoTitle}>
-                      {item.title}
-                    </Text>
-                    <Text style={s.videoMeta}>
-                      {formatDuration(item.durationSeconds)}
-                    </Text>
-                  </View>
+              contentContainerStyle={[
+                s.grid,
+                generatedVideos.length === 0 && s.emptyList,
+              ]}
+              ListEmptyComponent={
+                <View style={s.empty}>
                   <Ionicons
-                    name="chevron-forward"
-                    size={20}
+                    name="sparkles-outline"
+                    size={42}
                     color={c.textFaint}
                   />
-                </TouchableOpacity>
+                  <Text style={s.emptyText}>No generated videos yet.</Text>
+                </View>
+              }
+              renderItem={({ item }) => (
+                <View
+                  style={[
+                    s.videoThumbnailCell,
+                    {
+                      width: photoCellSize,
+                      height: photoCellSize,
+                      backgroundColor: c.surface,
+                    },
+                  ]}
+                >
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    onPress={() =>
+                      router.push(`/events/${id}/videos/${item.id}`)
+                    }
+                    style={StyleSheet.absoluteFill}
+                  >
+                    {item.previewUri ? (
+                      <GeneratedVideoPreview streamUrl={item.previewUri} />
+                    ) : (
+                      <View style={s.videoThumbnailFallback}>
+                        <Ionicons
+                          name="sparkles-outline"
+                          size={30}
+                          color={c.textFaint}
+                        />
+                      </View>
+                    )}
+                    <View style={s.videoPlayBadge}>
+                      <Ionicons name="play" size={22} color="#fff" />
+                    </View>
+                    <View style={s.videoThumbnailFooter}>
+                      <Text numberOfLines={1} style={s.videoThumbnailTitle}>
+                        {item.title}
+                      </Text>
+                      <Text style={s.videoThumbnailDuration}>
+                        {formatDuration(item.durationSeconds)}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                </View>
               )}
             />
           )}
@@ -1161,6 +1274,48 @@ export default function EventDetailScreen() {
                 onPress={() => void deletePhoto()}
               >
                 {deletingPhoto ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={s.confirmDeleteText}>Remove</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+      <Modal
+        visible={videoToDelete !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => !deletingVideo && setVideoToDelete(null)}
+      >
+        <View style={s.deleteBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => !deletingVideo && setVideoToDelete(null)}
+          />
+          <View style={s.deleteCard}>
+            <View style={s.deleteIcon}>
+              <Ionicons name="trash-outline" size={25} color={c.danger} />
+            </View>
+            <Text style={s.deleteTitle}>Remove this video?</Text>
+            <Text style={s.deleteCopy}>
+              It will be hidden from the gallery. The original file will not be deleted.
+            </Text>
+            <View style={s.deleteActions}>
+              <TouchableOpacity
+                style={s.cancelDeleteButton}
+                disabled={deletingVideo}
+                onPress={() => setVideoToDelete(null)}
+              >
+                <Text style={s.cancelDeleteText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.confirmDeleteButton}
+                disabled={deletingVideo}
+                onPress={() => void deleteVideo()}
+              >
+                {deletingVideo ? (
                   <ActivityIndicator size="small" color="#fff" />
                 ) : (
                   <Text style={s.confirmDeleteText}>Remove</Text>
@@ -1451,6 +1606,58 @@ const makeStyles = (c: ThemeColors) =>
       fontWeight: "700",
     },
     videoMeta: { color: c.textMuted, fontSize: 12, marginTop: 4 },
+    videoThumbnailCell: {
+      padding: 1,
+      overflow: "hidden",
+    },
+    videoThumbnailImage: {
+      width: "100%",
+      height: "100%",
+      borderRadius: 4,
+    },
+    videoThumbnailFallback: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    videoPlayBadge: {
+      position: "absolute",
+      top: "50%",
+      left: "50%",
+      width: 46,
+      height: 46,
+      marginLeft: -23,
+      marginTop: -23,
+      paddingLeft: 3,
+      borderRadius: 23,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "rgba(5,8,16,0.72)",
+      borderWidth: 1,
+      borderColor: "rgba(255,255,255,0.7)",
+    },
+    videoThumbnailFooter: {
+      position: "absolute",
+      right: 1,
+      bottom: 1,
+      left: 1,
+      paddingTop: 18,
+      paddingHorizontal: 8,
+      paddingBottom: 7,
+      backgroundColor: "rgba(5,8,16,0.68)",
+    },
+    videoThumbnailTitle: {
+      color: "#fff",
+      fontSize: 11,
+      fontWeight: "700",
+      paddingRight: 4,
+    },
+    videoThumbnailDuration: {
+      color: "rgba(255,255,255,0.82)",
+      fontSize: 10,
+      fontWeight: "600",
+      marginTop: 2,
+    },
     errorBox: {
       alignItems: "center",
       marginTop: 48,

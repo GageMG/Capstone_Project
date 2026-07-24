@@ -3,7 +3,7 @@ import time
 import logging
 from logging.handlers import RotatingFileHandler
 import tempfile
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from azure.core.exceptions import ResourceNotFoundError
 from PIL import Image, ImageOps
 from pillow_heif import register_heif_opener
@@ -16,6 +16,7 @@ from worker.PreFilter import ImgQualFilt
 from worker.SlideShow import SlideShowGenerator
 from api.StoryBoard import StoryBoardGen
 from worker.VideoExtraction import ExtractVidFrames
+from worker.VideoMetadata import VideoMetadataProcessor
 
 register_heif_opener(thumbnails=False)
 
@@ -57,6 +58,7 @@ class newRunner:
         self.ir = blipRanker(db= self.db, log=self.log)
         self.pf = ImgQualFilt(db= self.db, log= self.log)
         self.ve = ExtractVidFrames(db= self.db, log= self.log)
+        self.vm = VideoMetadataProcessor(db=self.db, log=self.log, blob=self.blob)
         self.ss = SlideShowGenerator(db=self.db, log= self.log, azure= self.blob)
         self.sb = StoryBoardGen(db=self.db, log=self.log)
 
@@ -97,7 +99,40 @@ class newRunner:
 
                             rgbImage.save(convertedPath, **saveOptions)
 
+                blobName = media.get("blob_name")
+                if not blobName:
+                    raise ValueError(f"Missing blob name for HEIF image: {sourcePath.name}")
+
+                jpegBlobName = str(PurePosixPath(blobName).with_suffix(".jpg"))
+                uploaded = self.blob.uploadLocalFile(
+                    blobName=jpegBlobName,
+                    localPath=str(convertedPath),
+                    contentType="image/jpeg",
+                )
+                if not uploaded:
+                    raise RuntimeError(f"Could not upload converted JPEG blob: {jpegBlobName}")
+
+                updatedUpload = self.db.updateUploadImageFormat(
+                    uploadID=media.get("upload_id"),
+                    blobName=uploaded["blob_name"],
+                    filePath=uploaded["url"],
+                    fileSize=uploaded["size_bytes"],
+                )
+                if not updatedUpload:
+                    raise RuntimeError(
+                        f"Could not update converted upload metadata: {media.get('upload_id')}"
+                    )
+
+                if not self.blob.deleteBlob(blobName):
+                    self.log.warning(
+                        "Converted HEIF upload but could not remove original blob: %s",
+                        blobName,
+                    )
+
                 media["file_path"] = str(convertedPath)
+                media["blob_name"] = uploaded["blob_name"]
+                media["mime_type"] = "image/jpeg"
+                media["file_size"] = uploaded["size_bytes"]
                 self.log.info(f"Converted HEIF image {sourcePath.name} to {convertedPath.name}")
 
             except Exception as error:
@@ -198,8 +233,14 @@ class newRunner:
                     if not sb:
                         raise ValueError(f"No approved storyboard photos found for event {eventID}")
                     music = self.db.getMusicByID(storyboard.get("music_id"))
-                    package = {"storyboard": storyboard, "items": sb, "music": music}
-                    videoPath = self.ss.generateVideo(package , eventID)    
+                    event = self.db.getEventByID(eventID)
+                    package = {
+                        "storyboard": storyboard,
+                        "items": sb,
+                        "music": music,
+                        "event": event or {},
+                    }
+                    videoPath = self.ss.generateVideo(package, eventID)
 
                     self.log.info(f"Video created successfully: {videoPath}")
 
@@ -258,6 +299,28 @@ class newRunner:
 
                 if dt == 'videos':
                     videoFlag = 'videos'
+                    metadataResults = self.vm.batchRun(videos=mediaSet, eventID=eventID)
+                    self.log.info("Video metadata results: %s", metadataResults)
+                    retryableMetadataFailures = [
+                        row for row in metadataResults.get("failed", [])
+                        if not row.get("hidden")
+                    ]
+                    if retryableMetadataFailures:
+                        raise RuntimeError(
+                            f"Video metadata processing failed: {retryableMetadataFailures}"
+                        )
+                    hiddenVideoIDs = {
+                        row.get("video_id")
+                        for row in metadataResults.get("failed", [])
+                        if row.get("hidden")
+                    }
+                    mediaSet = [
+                        video for video in mediaSet
+                        if video.get("video_id") not in hiddenVideoIDs
+                    ]
+                    if not mediaSet:
+                        self.log.warning("All videos in this job were unreadable and have been hidden.")
+                        return {"Video metadata": metadataResults}
                     mediaSet = self.ve.batchRun(videos=mediaSet, tempDir=tempDir, eventID=eventID)
                     dt = 'video_frames'
 

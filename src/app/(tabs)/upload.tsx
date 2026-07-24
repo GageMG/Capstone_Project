@@ -26,29 +26,37 @@ import { useTheme } from "@/theme/ThemeContext";
 const { width: SCREEN_WIDTH } = Dimensions.get("window");
 const THUMB = (SCREEN_WIDTH - 56) / 3;
 
-const MAX_PHOTOS = 20;
+const UPLOAD_BATCH_SIZE = 20;
 
-type PhotoMimeType =
+type SupportedMimeType =
   | "image/jpeg"
   | "image/png"
   | "image/gif"
   | "image/webp"
   | "image/heic"
-  | "image/heif";
+  | "image/heif"
+  | "video/mp4"
+  | "video/quicktime"
+  | "video/webm"
+  | "video/x-msvideo"
+  | "video/x-ms-wmv"
+  | "video/x-matroska";
 
-type PickedPhoto = {
+type PickedMedia = {
   id: string;
   uri: string;
   name: string;
-  mimeType: PhotoMimeType;
+  mimeType: SupportedMimeType;
+  mediaType: "photo" | "video";
+  file?: File;
 };
 type EventOption = { event_id: number; name: string };
 type UploadResponse = {
   uploaded: number;
-  results?: Array<{ status?: string; error?: string }>;
+  results?: Array<{ file_name?: string; status?: string; error?: string; reason?: string }>;
 };
 
-const PHOTO_MIME_BY_EXTENSION: Record<string, PhotoMimeType> = {
+const MIME_BY_EXTENSION: Record<string, SupportedMimeType> = {
   jpg: "image/jpeg",
   jpeg: "image/jpeg",
   png: "image/png",
@@ -56,30 +64,35 @@ const PHOTO_MIME_BY_EXTENSION: Record<string, PhotoMimeType> = {
   webp: "image/webp",
   heic: "image/heic",
   heif: "image/heif",
+  mp4: "video/mp4",
+  mov: "video/quicktime",
+  webm: "video/webm",
+  avi: "video/x-msvideo",
+  wmv: "video/x-ms-wmv",
+  mkv: "video/x-matroska",
 };
 
-const PHOTO_EXTENSION_BY_MIME: Record<PhotoMimeType, string> = {
+const EXTENSION_BY_MIME: Record<SupportedMimeType, string> = {
   "image/jpeg": "jpg",
   "image/png": "png",
   "image/gif": "gif",
   "image/webp": "webp",
   "image/heic": "heic",
   "image/heif": "heif",
+  "video/mp4": "mp4",
+  "video/quicktime": "mov",
+  "video/webm": "webm",
+  "video/x-msvideo": "avi",
+  "video/x-ms-wmv": "wmv",
+  "video/x-matroska": "mkv",
 };
 
 function getSupportedMimeType(
   mimeType: string | null | undefined,
   fileNameOrUri: string
-): PhotoMimeType | null {
-  if (
-    mimeType === "image/jpeg" ||
-    mimeType === "image/png" ||
-    mimeType === "image/gif" ||
-    mimeType === "image/webp" ||
-    mimeType === "image/heic" ||
-    mimeType === "image/heif"
-  ) {
-    return mimeType;
+): SupportedMimeType | null {
+  if (mimeType && Object.values(MIME_BY_EXTENSION).includes(mimeType as SupportedMimeType)) {
+    return mimeType as SupportedMimeType;
   }
 
   const extension = fileNameOrUri
@@ -87,7 +100,7 @@ function getSupportedMimeType(
     .split(".")
     .pop()
     ?.toLowerCase();
-  return extension ? PHOTO_MIME_BY_EXTENSION[extension] ?? null : null;
+  return extension ? MIME_BY_EXTENSION[extension] ?? null : null;
 }
 
 export default function UploadScreen() {
@@ -95,8 +108,9 @@ export default function UploadScreen() {
   const { loggedIn } = useAuth();
   const { eventId, eventName, setCurrentEvent } = useCurrentEvent();
   const s = useMemo(() => makeStyles(c), [c]);
-  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
+  const [mediaItems, setMediaItems] = useState<PickedMedia[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const [securityConfirmed, setSecurityConfirmed] = useState(false);
   const [events, setEvents] = useState<EventOption[]>([]);
@@ -138,35 +152,30 @@ export default function UploadScreen() {
     eventName ??
     null;
 
-  const isValidImage = (photo: PickedPhoto) =>
-    getSupportedMimeType(photo.mimeType, photo.name) !== null;
+  const isValidMedia = (item: PickedMedia) =>
+    getSupportedMimeType(item.mimeType, item.name) !== null;
 
   const validateUpload = () => {
     if (!loggedIn) {
-      Alert.alert("Login Required", "Log in before uploading photos.");
+      Alert.alert("Login Required", "Log in before uploading media.");
       return false;
     }
 
     if (!eventId) {
-      Alert.alert("No Event Selected", "Choose which event these photos belong to.");
+      Alert.alert("No Event Selected", "Choose which event these files belong to.");
       return false;
     }
 
-    if (photos.length === 0) {
-      Alert.alert("No Photos", "Please select at least one photo.");
+    if (mediaItems.length === 0) {
+      Alert.alert("No Media", "Please select at least one photo or video.");
       return false;
     }
 
-    if (photos.length > MAX_PHOTOS) {
-      Alert.alert("Too Many Photos", `You can only upload ${MAX_PHOTOS} photos at once.`);
-      return false;
-    }
-
-    const invalidPhoto = photos.find((photo) => !isValidImage(photo));
-    if (invalidPhoto) {
+    const invalidItem = mediaItems.find((item) => !isValidMedia(item));
+    if (invalidItem) {
       Alert.alert(
         "Invalid File",
-        "Only JPG, JPEG, PNG, GIF, WebP, HEIC, and HEIF images are allowed."
+        "Allowed formats: JPG, JPEG, PNG, GIF, WebP, HEIC, HEIF, MP4, MOV, WebM, AVI, WMV, and MKV."
       );
       return false;
     }
@@ -184,20 +193,20 @@ export default function UploadScreen() {
     if (status !== "granted") {
       Alert.alert(
         "Permission Required",
-        "Please allow access to your photo library to upload images."
+        "Please allow access to your media library to upload photos and videos."
       );
       return;
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ImagePicker.MediaTypeOptions.All,
       allowsMultipleSelection: true,
       quality: 0.85,
-      selectionLimit: MAX_PHOTOS,
+      selectionLimit: 0,
     });
 
     if (!result.canceled) {
-      const picked: PickedPhoto[] = result.assets.flatMap((asset, index) => {
+      const picked: PickedMedia[] = result.assets.flatMap((asset, index) => {
         const mimeType = getSupportedMimeType(
           asset.mimeType,
           asset.fileName ?? asset.uri
@@ -210,8 +219,10 @@ export default function UploadScreen() {
             uri: asset.uri,
             name:
               asset.fileName ??
-              `photo_${Date.now()}_${index}.${PHOTO_EXTENSION_BY_MIME[mimeType]}`,
+              `media_${Date.now()}_${index}.${EXTENSION_BY_MIME[mimeType]}`,
             mimeType,
+            mediaType: mimeType.startsWith("video/") ? "video" : "photo",
+            file: asset.file ?? undefined,
           },
         ];
       });
@@ -219,67 +230,94 @@ export default function UploadScreen() {
       if (picked.length !== result.assets.length) {
         Alert.alert(
           "Unsupported Files",
-          "Only JPG, JPEG, PNG, GIF, WebP, HEIC, and HEIF images were added."
+          "Only JPG, JPEG, PNG, GIF, WebP, HEIC, HEIF, MP4, MOV, WebM, AVI, WMV, and MKV files were added."
         );
       }
 
-      const combined = [...photos, ...picked].slice(0, MAX_PHOTOS);
-
-      if (photos.length + picked.length > MAX_PHOTOS) {
-        Alert.alert("Upload Limit", `Only ${MAX_PHOTOS} photos can be selected at once.`);
-      }
-
-      setPhotos(combined);
+      setMediaItems((current) => [...current, ...picked]);
       setDone(false);
     }
   };
 
   const remove = (id: string) =>
-    setPhotos((prev) => prev.filter((p) => p.id !== id));
+    setMediaItems((prev) => prev.filter((item) => item.id !== id));
 
   const clearAll = () =>
-    Alert.alert("Clear All", "Remove all selected photos?", [
+    Alert.alert("Clear All", "Remove all selected files?", [
       { text: "Cancel", style: "cancel" },
-      { text: "Clear", style: "destructive", onPress: () => setPhotos([]) },
+      { text: "Clear", style: "destructive", onPress: () => setMediaItems([]) },
     ]);
 
   const handleUpload = async () => {
     if (!validateUpload()) return;
 
     setUploading(true);
+    setUploadProgress(`0/${mediaItems.length}`);
+    const completedIds = new Set<string>();
+    let totalUploaded = 0;
     try {
-      const formData = new FormData();
+      for (let start = 0; start < mediaItems.length; start += UPLOAD_BATCH_SIZE) {
+        const batch = mediaItems.slice(start, start + UPLOAD_BATCH_SIZE);
+        const formData = new FormData();
+        formData.append("eventID", String(eventId));
 
-      formData.append("eventID", String(eventId));
+        for (const item of batch) {
+          if (Platform.OS === "web") {
+            let file: Blob;
+            if (item.file) {
+              file = item.file.type === item.mimeType
+                ? item.file
+                : item.file.slice(0, item.file.size, item.mimeType);
+            } else {
+              const response = await fetch(item.uri);
+              if (!response.ok) throw new Error(`Could not read ${item.name}.`);
+              const blob = await response.blob();
+              file = blob.type === item.mimeType
+                ? blob
+                : blob.slice(0, blob.size, item.mimeType);
+            }
+            formData.append("files", file, item.name);
+          } else {
+            formData.append("files", {
+              uri: item.uri,
+              name: item.name,
+              type: item.mimeType,
+            } as any);
+          }
+        }
 
-      photos.forEach((photo) => {
-        formData.append("files", {
-          uri: photo.uri,
-          name: photo.name,
-          type: photo.mimeType,
-        } as any);
-      });
-
-      const result = await apiUpload<UploadResponse>("/upload/user", formData);
-      if (result.uploaded < 1) {
-        const reason = result.results?.find((item) => item.error)?.error;
-        throw new Error(reason ?? "The server did not accept any photos.");
+        const result = await apiUpload<UploadResponse>("/upload/user", formData);
+        totalUploaded += result.uploaded;
+        const resultsByName = new Map(result.results?.map((item) => [item.file_name, item]) ?? []);
+        batch.forEach((item) => {
+          const fileResult = resultsByName.get(item.name);
+          if (fileResult?.status === "saved" || (!result.results && result.uploaded === batch.length)) {
+            completedIds.add(item.id);
+          }
+        });
+        setUploadProgress(`${Math.min(start + batch.length, mediaItems.length)}/${mediaItems.length}`);
       }
 
-      setDone(true);
-      setPhotos([]);
-      setSecurityConfirmed(false);
+      const failedCount = mediaItems.length - completedIds.size;
+      setMediaItems((current) => current.filter((item) => !completedIds.has(item.id)));
+      setDone(failedCount === 0);
+      if (failedCount === 0) setSecurityConfirmed(false);
 
       Alert.alert(
-        "Upload Complete",
-        `${result.uploaded} photo${result.uploaded !== 1 ? "s" : ""} uploaded to ${
+        failedCount === 0 ? "Upload Complete" : "Upload Partially Complete",
+        `${totalUploaded} file${totalUploaded !== 1 ? "s" : ""} uploaded to ${
           selectedEventName ?? "the selected event"
-        }.`
+        }.${failedCount ? ` ${failedCount} file${failedCount === 1 ? "" : "s"} remain selected because they were not accepted.` : ""}`
       );
     } catch (error: any) {
-      Alert.alert("Upload Failed", error.message ?? "Please try again.");
+      setMediaItems((current) => current.filter((item) => !completedIds.has(item.id)));
+      Alert.alert(
+        totalUploaded > 0 ? "Upload Stopped" : "Upload Failed",
+        `${totalUploaded > 0 ? `${totalUploaded} files uploaded before the error. ` : ""}${error.message ?? "Please try again."}`
+      );
     } finally {
       setUploading(false);
+      setUploadProgress(null);
     }
   };
 
@@ -292,7 +330,7 @@ export default function UploadScreen() {
           <Text style={s.eyebrow}>DEVICE LIBRARY</Text>
           <Text style={s.title}>Upload</Text>
         </View>
-        {photos.length > 0 && (
+        {mediaItems.length > 0 && (
           <TouchableOpacity style={s.trashBtn} onPress={clearAll}>
             <Ionicons name="trash-outline" size={18} color={c.danger} />
           </TouchableOpacity>
@@ -300,9 +338,9 @@ export default function UploadScreen() {
       </View>
 
       <Text style={s.subtitle}>
-        {photos.length > 0
-          ? `${photos.length} photo${photos.length !== 1 ? "s" : ""} selected`
-          : "No photos selected"}
+        {mediaItems.length > 0
+          ? `${mediaItems.length} file${mediaItems.length !== 1 ? "s" : ""} selected`
+          : "No photos or videos selected"}
       </Text>
 
       <View style={s.eventBox}>
@@ -456,13 +494,13 @@ export default function UploadScreen() {
         <View style={{ flex: 1 }}>
           <Text style={s.securityTitle}>Security Check</Text>
           <Text style={s.securityText}>
-            JPG, PNG, GIF, WebP, HEIC, and HEIF files are allowed. Uploads are
-            authenticated and added to the selected event.
+            Photos plus MP4, MOV, WebM, AVI, WMV, and MKV videos are allowed.
+            Uploads are authenticated and added to the selected event.
           </Text>
         </View>
       </View>
 
-      {photos.length === 0 ? (
+      {mediaItems.length === 0 ? (
         <View style={s.empty}>
           <TouchableOpacity
             style={s.dropZone}
@@ -472,9 +510,9 @@ export default function UploadScreen() {
             <View style={s.iconRing}>
               <Ionicons name="images-outline" size={36} color={c.accent} />
             </View>
-            <Text style={s.dropTitle}>Choose Photos</Text>
+            <Text style={s.dropTitle}>Choose Photos or Videos</Text>
             <Text style={s.dropSub}>
-              Tap to browse your device library{"\n"}Up to 20 photos at once
+              Tap to browse your device library
             </Text>
             <View style={s.selectBadge}>
               <Ionicons name="add" size={14} color="#fff" />
@@ -485,13 +523,13 @@ export default function UploadScreen() {
           {done && (
             <View style={s.successBanner}>
               <Ionicons name="checkmark-circle" size={18} color={c.successText} />
-              <Text style={s.successText}>Photos uploaded successfully</Text>
+              <Text style={s.successText}>Media uploaded successfully</Text>
             </View>
           )}
         </View>
       ) : (
         <FlatList
-          data={photos}
+          data={mediaItems}
           numColumns={3}
           keyExtractor={(item) => item.id}
           contentContainerStyle={s.grid}
@@ -499,11 +537,18 @@ export default function UploadScreen() {
           showsVerticalScrollIndicator={false}
           renderItem={({ item }) => (
             <View style={[s.thumb, { width: THUMB, height: THUMB }]}>
-              <Image
-                source={{ uri: item.uri }}
-                style={s.thumbImg}
-                resizeMode="cover"
-              />
+              {item.mediaType === "video" ? (
+                <View style={s.videoThumb}>
+                  <Ionicons name="videocam" size={30} color={c.accent} />
+                  <Text style={s.videoName} numberOfLines={2}>{item.name}</Text>
+                </View>
+              ) : (
+                <Image
+                  source={{ uri: item.uri }}
+                  style={s.thumbImg}
+                  resizeMode="cover"
+                />
+              )}
               <TouchableOpacity
                 style={s.removeBtn}
                 onPress={() => remove(item.id)}
@@ -526,7 +571,7 @@ export default function UploadScreen() {
         />
       )}
 
-      {photos.length > 0 && (
+      {mediaItems.length > 0 && (
         <View style={s.footer}>
           <TouchableOpacity
             style={s.confirmRow}
@@ -539,7 +584,7 @@ export default function UploadScreen() {
               color={securityConfirmed ? c.successText : c.textMuted}
             />
             <Text style={s.confirmText}>
-              I confirm these photos are safe to upload.
+              I confirm these photos and videos are safe to upload.
             </Text>
           </TouchableOpacity>
 
@@ -556,13 +601,13 @@ export default function UploadScreen() {
             {uploading ? (
               <>
                 <ActivityIndicator color="#fff" size="small" />
-                <Text style={s.uploadBtnText}>UPLOADING…</Text>
+                <Text style={s.uploadBtnText}>UPLOADING {uploadProgress ?? "…"}</Text>
               </>
             ) : (
               <>
                 <Ionicons name="cloud-upload-outline" size={20} color="#fff" />
                 <Text style={s.uploadBtnText}>
-                  UPLOAD {photos.length} PHOTO{photos.length !== 1 ? "S" : ""}
+                  UPLOAD {mediaItems.length} FILE{mediaItems.length !== 1 ? "S" : ""}
                 </Text>
               </>
             )}
@@ -899,6 +944,20 @@ const makeStyles = (c: ThemeColors) =>
       backgroundColor: c.surface,
     },
     thumbImg: { width: "100%", height: "100%" },
+    videoThumb: {
+      width: "100%",
+      height: "100%",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 8,
+      padding: 10,
+      backgroundColor: c.bg,
+    },
+    videoName: {
+      color: c.textMuted,
+      fontSize: 10,
+      textAlign: "center",
+    },
     removeBtn: {
       position: "absolute",
       top: 4,

@@ -8,13 +8,14 @@ from shared.ProjectHelper import Helpers as ph
 
 
 class ImgQualFilt:
-    def __init__(self, db, log, minWidth=800, minHeight=600, blurThreshold=100., darkThreshold = 45.0, brightThreshold = 215.0, contrastThreshold = 30.0):
+    def __init__(self, db, log, minWidth=800, minHeight=600, blurThreshold=100., darkThreshold = 45.0, brightThreshold = 215.0, contrastThreshold = 30.0, noiseThreshold = 12.0):
         self.minWidth = minWidth
         self.minHeight = minHeight
         self.blurThres = blurThreshold
         self.darkThres = darkThreshold
         self.brightThres = brightThreshold
         self.contrastThres = contrastThreshold
+        self.noiseThres = noiseThreshold
         self.db = db
         self.log = log
 
@@ -71,10 +72,28 @@ class ImgQualFilt:
 
     def errorDict(self, photoID):
         return self.buildDict(photoID,"error",["FNF"],101.0,-1,-1,0,0,None, None,None,None)
-        
+
+    def noiseJudgement(self, img, height, width):
+    # Immerkaer method
+
+        if height < 3 or width < 3:
+            return 0.0
+        kernal = np.array([[1, -2, 1],
+                            [-2, 4, -2],
+                            [1, -2, 1]], dtype=np.float64)
+
+        response = cv.filter2D(img.astype(np.float64), cv.CV_64F, kernal)
+
+        valid_response = response[1:-1, 1:-1]
+        sigma = np.sum(np.abs(valid_response))
+        sigma *= np.sqrt(0.5 * np.pi) / (6 * (width - 2) * (height - 2))
+
+        return sigma
 
     def analyze(self, photoID: int, imgPath: str):
         path = Path(imgPath)
+
+        maxMildIssues = 1
 
         imgHash = self.hashImages(path)
         imgHash = self.hashToStr(imgHash)
@@ -97,27 +116,52 @@ class ImgQualFilt:
         brightScore = float(np.mean(gray))
         contrastScore = float(np.std(gray))
 
+        noise = self.noiseJudgement(gray, height, width)
+
         reason = []
+        severeReason = []
 
         if width < self.minWidth or height < self.minHeight:
             reason.append("low_resolution")
+            if (
+                width < self.minWidth * 0.5
+                or height < self.minHeight * 0.5
+            ):
+                severeReason.append("low_resolution")
 
         if blurScore < self.blurThres:
             reason.append('blurry')
+            if blurScore < self.blurThres * 0.25:
+                severeReason.append("blurry")
 
         if singleColor:
             reason.append('single_color')
+            severeReason.append("single_color")
 
         if brightScore < self.darkThres:
             reason.append('dark')
-        
+            if brightScore < self.darkThres * 0.35:
+                severeReason.append("dark")
+
         if brightScore > self.brightThres:
             reason.append('bright')
-        
+            severeBrightThreshold = self.brightThres + (
+                (255.0 - self.brightThres) * 0.75
+            )
+            if brightScore > severeBrightThreshold:
+                severeReason.append("bright")
+
         if contrastScore < self.contrastThres:
             reason.append('low_contrast')
+            if contrastScore < self.contrastThres * 0.33:
+                severeReason.append("low_contrast")
 
-        if len(reason) > 0:
+        if noise > self.noiseThres:
+            reason.append('noisy_photo')
+            if noise > self.noiseThres * 2.5:
+                severeReason.append("noisy_photo")
+
+        if severeReason or len(reason) > maxMildIssues:
             status = 'rejected'
         else:
             status = 'approved'

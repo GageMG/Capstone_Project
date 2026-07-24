@@ -1,18 +1,22 @@
 import math
 import os
+import re
+import subprocess
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 import cv2 as cv
+import imageio_ffmpeg
 import numpy as np
 from moviepy import AudioFileClip, VideoFileClip, concatenate_audioclips
 
 
 class SlideShowGenerator:
     def __init__(self, db, log, azure, width: int = 1280, height: int = 720,
-                 fps: int = 30, secPerPhoto: int = 3):
+                 fps: int = 30, secPerPhoto: int = 5):
         self.width = width
         self.height = height
         self.fps = fps
@@ -55,6 +59,37 @@ class SlideShowGenerator:
             cv.putText(frame, subtitle[:95], (40, yStart + 90), cv.FONT_HERSHEY_SIMPLEX,0.65, (220, 220, 220), 1, cv.LINE_AA)
         return frame
 
+    def createTitleFrame(self, eventName):
+        title = str(eventName or "Event Highlight").strip() or "Event Highlight"
+        frame = np.zeros((self.height, self.width, 3), dtype=np.uint8)
+        font = cv.FONT_HERSHEY_SIMPLEX
+        fontScale = 1.8
+        thickness = 3
+        maxWidth = int(self.width * 0.82)
+
+        while fontScale > 0.7:
+            (textWidth, _), _ = cv.getTextSize(title, font, fontScale, thickness)
+            if textWidth <= maxWidth:
+                break
+            fontScale -= 0.1
+
+        (textWidth, textHeight), baseline = cv.getTextSize(
+            title, font, fontScale, thickness
+        )
+        x = max((self.width - textWidth) // 2, 20)
+        y = max((self.height + textHeight - baseline) // 2, textHeight + 20)
+        cv.putText(
+            frame,
+            title,
+            (x, y),
+            font,
+            fontScale,
+            (255, 255, 255),
+            thickness,
+            cv.LINE_AA,
+        )
+        return frame
+
     @staticmethod
     def positiveFloat(value, default=None):
         try:
@@ -81,14 +116,80 @@ class SlideShowGenerator:
             writer.write(displayFrame)
         return totalFrames
 
-    def writeVideoSegment(self, writer, videoPath, startSec=0, endSec=None,durationSeconds=None, sceneLabel=None, reason=None):
-        cap = cv.VideoCapture(str(videoPath))
-        if not cap.isOpened():
-            raise ValueError(f"Could not open video clip: {videoPath}")
+    def normalizeVideoForDecoding(self, videoPath):
+        sourcePath = Path(videoPath)
+        normalizedPath = sourcePath.with_name(
+            f"{sourcePath.stem}_{uuid4().hex[:8]}_normalized.mp4"
+        )
+        videoFilter = (
+            f"scale={self.width}:{self.height}:force_original_aspect_ratio=decrease,"
+            f"pad={self.width}:{self.height}:(ow-iw)/2:(oh-ih)/2:black,"
+            f"setsar=1,fps={self.fps}"
+        )
+        command = [
+            imageio_ffmpeg.get_ffmpeg_exe(),
+            "-y",
+            "-i", str(sourcePath),
+            "-map", "0:v:0",
+            "-an",
+            "-sn",
+            "-dn",
+            "-map_metadata", "-1",
+            "-vf", videoFilter,
+            "-c:v", "libx264",
+            "-preset", "veryfast",
+            "-crf", "23",
+            "-pix_fmt", "yuv420p",
+            "-movflags", "+faststart",
+            str(normalizedPath),
+        ]
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=600,
+            check=False,
+        )
+        if completed.returncode != 0:
+            details = (completed.stderr or completed.stdout or "").strip()
+            raise ValueError(
+                f"FFmpeg could not normalize video clip {sourcePath.name}: "
+                f"{details[-2000:]}"
+            )
+        if not normalizedPath.is_file() or normalizedPath.stat().st_size == 0:
+            raise ValueError(
+                f"FFmpeg did not create a normalized video for {sourcePath.name}."
+            )
+        return normalizedPath
 
-        sourceFps = self.positiveFloat(cap.get(cv.CAP_PROP_FPS), float(self.fps))
-        totalFrames = max(float(cap.get(cv.CAP_PROP_FRAME_COUNT) or 0), 0)
-        sourceDuration = totalFrames / sourceFps if totalFrames else 0.0
+    def writeVideoSegment(self, writer, videoPath, startSec=0, endSec=None,durationSeconds=None, sceneLabel=None, reason=None):
+        clip = None
+        normalizedPath = None
+        try:
+            clip = VideoFileClip(str(videoPath), audio=False)
+        except Exception as firstError:
+            self.log.warning(
+                "MoviePy could not open %s directly; normalizing its video stream: %s",
+                Path(videoPath).name,
+                firstError,
+            )
+            try:
+                normalizedPath = self.normalizeVideoForDecoding(videoPath)
+                clip = VideoFileClip(str(normalizedPath), audio=False)
+            except Exception as fallbackError:
+                if normalizedPath is not None:
+                    normalizedPath.unlink(missing_ok=True)
+                raise ValueError(
+                    f"Could not open video clip after normalization: {videoPath}"
+                ) from fallbackError
+
+        sourceDuration = self.positiveFloat(clip.duration, 0.0)
+        if sourceDuration <= 0:
+            clip.close()
+            if normalizedPath is not None:
+                normalizedPath.unlink(missing_ok=True)
+            raise ValueError(f"Video clip has no playable duration: {videoPath}")
+
         try:
             start = max(float(startSec or 0), 0.0)
         except (TypeError, ValueError):
@@ -106,38 +207,44 @@ class SlideShowGenerator:
             start = min(start, sourceDuration)
             end = min(end, sourceDuration)
         if not math.isfinite(end) or end <= start:
-            cap.release()
+            if clip is not None:
+                clip.close()
+            if normalizedPath is not None:
+                normalizedPath.unlink(missing_ok=True)
             return 0
 
         outputFrames = max(int(round((end - start) * self.fps)), 1)
         framesWritten = 0
-        startFrame = max(int(math.floor(start * sourceFps)), 0)
-        currentSourceFrame = startFrame - 1
-        lastFrame = None
-        cap.set(cv.CAP_PROP_POS_FRAMES, startFrame)
         try:
             for index in range(outputFrames):
-                timestamp = start + index / self.fps
-                wantedSourceFrame = max(int(math.floor(timestamp * sourceFps)), startFrame)
-                while currentSourceFrame < wantedSourceFrame:
-                    ok, sourceFrame = cap.read()
-                    if not ok:
-                        break
-                    lastFrame = sourceFrame
-                    currentSourceFrame += 1
-                if lastFrame is None:
-                    break
-                frame = self.resizePadding(lastFrame)
-                #if sceneLabel or reason:
-                #    frame = self.drawCaption(frame, sceneLabel, reason)
+                timestamp = min(start + index / self.fps, end - (1 / self.fps))
+                sourceFrame = clip.get_frame(max(timestamp, start))
+                sourceFrame = np.asarray(sourceFrame)
+                if sourceFrame.dtype != np.uint8:
+                    sourceFrame = np.clip(sourceFrame, 0, 255).astype(np.uint8)
+                if sourceFrame.ndim == 2:
+                    sourceFrame = cv.cvtColor(sourceFrame, cv.COLOR_GRAY2BGR)
+                elif sourceFrame.shape[2] == 4:
+                    sourceFrame = cv.cvtColor(sourceFrame, cv.COLOR_RGBA2BGR)
+                else:
+                    sourceFrame = cv.cvtColor(sourceFrame, cv.COLOR_RGB2BGR)
+                frame = self.resizePadding(sourceFrame)
                 writer.write(frame)
                 framesWritten += 1
         finally:
-            cap.release()
+            if clip is not None:
+                clip.close()
+            if normalizedPath is not None:
+                normalizedPath.unlink(missing_ok=True)
         return framesWritten
 
+    @staticmethod
+    def safeFilePart(value):
+        cleaned = re.sub(r"[^A-Za-z0-9]+", "_", str(value or "").strip())
+        return cleaned.strip("_") or "event"
+
     def generatedBlobName(self, eventID: int, fileName: str):
-        return f"events/{eventID}/generated_videos/{uuid4().hex}_{Path(fileName).name}"
+        return f"events/{eventID}/generated_videos/{Path(fileName).name}"
 
     @staticmethod
     def blobNameFromUrl(filePath):
@@ -152,6 +259,12 @@ class SlideShowGenerator:
     def normalizeStoryboard(self, storyboard):
         if isinstance(storyboard, dict):
             metadata = dict(storyboard.get("storyboard") or storyboard.get("metadata") or {})
+            event = dict(storyboard.get("event") or {})
+            metadata["event_name"] = (
+                event.get("name")
+                or metadata.get("event_name")
+                or metadata.get("eventName")
+            )
             music = dict(storyboard.get("music") or {})
             items = storyboard.get("items") or storyboard.get("storyboard_items") or []
         else:
@@ -214,10 +327,21 @@ class SlideShowGenerator:
         return self.downloadMusicToTemp(tempPath)
 
     def generateVideo(self, storyboard, eventID: int, outputname=None, musicPath=None):
- 
+
         metadata, music, items = self.normalizeStoryboard(storyboard)
-        outputname = outputname or f"event_{eventID}_slideshow.mp4"
+        eventName = str(metadata.get("event_name") or f"Event {eventID}").strip()
+        videoType = str(metadata.get("video_type") or "slideshow")
+        createdAt = datetime.now(timezone.utc)
+        uniqueToken = f"{createdAt.strftime('%Y%m%d_%H%M%S')}_{uuid4().hex[:8]}"
+        outputname = outputname or (
+            f"{self.safeFilePart(eventName)}_"
+            f"{self.safeFilePart(videoType)}_{uniqueToken}.mp4"
+        )
         finalOutputName = outputname if outputname.lower().endswith(".mp4") else f"{outputname}.mp4"
+        generatedTitle = (
+            f"{eventName} {videoType.replace('_', ' ').title()} - "
+            f"{createdAt.strftime('%Y-%m-%d %H:%M:%S UTC')}"
+        )
 
         with tempfile.TemporaryDirectory() as tempDir:
             tempPath = Path(tempDir)
@@ -233,20 +357,32 @@ class SlideShowGenerator:
                 raise RuntimeError("Could not open slideshow video writer.")
 
             itemsUsed = 0
+            videoClipsUsed = 0
             framesWritten = 0
             try:
+                titleFrame = self.createTitleFrame(eventName)
+                framesWritten += self.writeSlide(writer, titleFrame, 3.0)
+
                 for item in media:
                     itemID = item.get("storyboard_item_id") or item.get("photo_id") or item.get("video_id")
+                    mediaType = str(item.get("source_type") or item.get("media_type")
+                                    or item.get("type") or "photo").lower()
                     if item.get("error"):
+                        if mediaType == "video":
+                            raise RuntimeError(
+                                f"Selected video clip {itemID} could not be downloaded: {item['error']}"
+                            )
                         self.log.warning("Skipping storyboard item %s: %s", itemID, item["error"])
                         continue
                     path = Path(str(item.get("file_path") or ""))
                     if not path.is_file():
+                        if mediaType == "video":
+                            raise RuntimeError(
+                                f"Selected video clip {itemID} is missing locally: {path}"
+                            )
                         self.log.warning("Skipping missing local storyboard media: %s", path)
                         continue
 
-                    mediaType = str(item.get("source_type") or item.get("media_type")
-                                    or item.get("type") or "photo").lower()
                     if mediaType == "video":
                         written = self.writeVideoSegment(
                             writer, path,
@@ -254,6 +390,18 @@ class SlideShowGenerator:
                             endSec=item.get("clip_end_seconds", item.get("clip_end")),
                             durationSeconds=item.get("duration_seconds"),
                             sceneLabel=item.get("scene_label"), reason=item.get("reason"))
+                        if written <= 0:
+                            raise RuntimeError(
+                                f"Selected video clip {itemID} decoded zero frames."
+                            )
+                        videoClipsUsed += 1
+                        self.log.info(
+                            "Added storyboard video clip %s (%s-%s seconds, %s frames)",
+                            itemID,
+                            item.get("clip_start_seconds", item.get("clip_start", 0)),
+                            item.get("clip_end_seconds", item.get("clip_end")),
+                            written,
+                        )
                     else:
                         img = cv.imread(str(path))
                         if img is None:
@@ -277,11 +425,11 @@ class SlideShowGenerator:
                 videoPath=str(rawVideoPath), musicPath=resolvedMusic,
                 outPutPath=str(finalVideoPath), eventID=eventID,
                 fileName=finalOutputName, durationSeconds=framesWritten / self.fps,
-                itemsUsed=itemsUsed, musicID=metadata.get("music_id") or music.get("music_id"),
-                videoType=metadata.get("video_type") or "slideshow",
-                title=f"Event {eventID} {str(metadata.get('video_type') or 'slideshow').replace('_', ' ').title()}")
+                itemsUsed=itemsUsed, videoClipsUsed=videoClipsUsed,
+                musicID=metadata.get("music_id") or music.get("music_id"),
+                videoType=videoType, title=generatedTitle)
 
-    def attachMusic(self, videoPath, musicPath, outPutPath, eventID=None, fileName=None,durationSeconds=None, itemsUsed=None, musicID=None,videoType="slideshow", title=None):
+    def attachMusic(self, videoPath, musicPath, outPutPath, eventID=None, fileName=None,durationSeconds=None, itemsUsed=None, videoClipsUsed=0, musicID=None,videoType="slideshow", title=None):
         video = VideoFileClip(videoPath)
         music = None
         audio = None
@@ -331,6 +479,7 @@ class SlideShowGenerator:
 
         result = {
             "event_id": eventID, "items_used": itemsUsed,
+            "video_clips_used": videoClipsUsed,
             "duration_seconds": savedDuration, "blob_name": uploadResult["blob_name"],
             "url": uploadResult["url"],
             "generated_video": dbRows[0] if isinstance(dbRows, list) else dbRows,

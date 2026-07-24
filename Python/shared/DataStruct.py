@@ -178,11 +178,16 @@ class uploadModel(BaseModel):
 class photoSlideshowAction(BaseModel):
     action: Literal["approve", "exclude"]
 
+class PromptHistoryMessage(BaseModel):
+    role: Literal["user", "assistant"]
+    content: str = Field(..., min_length=1, max_length=1000)
+
 class PromptRequest(BaseModel):
     eventID: int = Field(..., gt=0)
     userID: int = Field(..., gt=0)
     guestID: int | None = None
     prompt: str = Field(..., min_length=1, max_length=1000)
+    history: list[PromptHistoryMessage] = Field(default_factory=list, max_length=10)
 
 
 class MakeVideoRequest(BaseModel):
@@ -2907,6 +2912,41 @@ mood_keywords={
     )
     }
 class MediaMappingConfig:
+    UNIVERSAL_EVENT_MOMENT_KEYWORDS: dict[str, dict[str, int]] = {
+        "energetic": {
+            "firework": 100,
+            "fireworks": 100,
+            "pyrotechnic": 95,
+            "pyrotechnics": 95,
+            "sparkler": 85,
+            "sparklers": 85,
+        },
+        "happy": {
+            "firework": 90,
+            "fireworks": 90,
+            "pyrotechnic": 85,
+            "pyrotechnics": 85,
+            "sparkler": 80,
+            "sparklers": 80,
+        },
+        "dramatic": {
+            "firework": 90,
+            "fireworks": 90,
+            "pyrotechnic": 90,
+            "pyrotechnics": 90,
+            "sparkler": 75,
+            "sparklers": 75,
+        },
+        "general": {
+            "firework": 90,
+            "fireworks": 90,
+            "pyrotechnic": 85,
+            "pyrotechnics": 85,
+            "sparkler": 75,
+            "sparklers": 75,
+        },
+    }
+
     THEME_CATEGORY_MAP: dict[str, tuple[str, ...]] = {
         "romance": ("romantic", "sentimental", "calm"),
         "friendship": ("friends", "happy", "funny"),
@@ -2950,8 +2990,8 @@ class MediaMappingConfig:
     }
 
     TIMING_SETTINGS: dict[str, dict[str, float]] = {
-        "slow": {"photo_seconds": 6.0, "video_clip_seconds": 30.0},
-        "medium": {"photo_seconds": 4.0, "video_clip_seconds": 22.0},
-        "fast": {"photo_seconds": 2.5, "video_clip_seconds": 15.0},
-        "unknown": {"photo_seconds": 4.0, "video_clip_seconds": 22.0},
+        "slow": {"photo_seconds": 7.0, "video_clip_seconds": 30.0},
+        "medium": {"photo_seconds": 5.0, "video_clip_seconds": 22.0},
+        "fast": {"photo_seconds": 3.5, "video_clip_seconds": 15.0},
+        "unknown": {"photo_seconds": 5.0, "video_clip_seconds": 22.0},
     }

@@ -1,10 +1,12 @@
 import os
+import time
+from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from dotenv import load_dotenv
 from shared.ProjectHelper import Helpers as ph
-from supabase import Client, create_client
-from datetime import datetime, timezone
+from supabase import Client, ClientOptions, create_client
 
 
 class SQLbuilder:
@@ -17,7 +19,15 @@ class SQLbuilder:
         if not self.supabase_url or not self.service_key:
             raise ValueError("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY environment variables")
 
-        self.client: Client = create_client(self.supabase_url, self.service_key)
+        # The synchronous Supabase client is shared by concurrent FastAPI
+        # requests. Disabling HTTP/2 avoids httpcore stream-state failures when
+        # the gallery loads media and generated videos at the same time.
+        self.http_client = httpx.Client(http2=False)
+        self.client: Client = create_client(
+            self.supabase_url,
+            self.service_key,
+            options=ClientOptions(httpx_client=self.http_client),
+        )
         self.log = log
 
     def connect(self):
@@ -28,6 +38,25 @@ class SQLbuilder:
         except Exception as error:
             self.log.info("Connection failed:", error)
             return False
+
+    def executeWithRetry(self, operation, description: str, maxAttempts: int = 3):
+        for attempt in range(1, maxAttempts + 1):
+            try:
+                return operation()
+            except httpx.TransportError as error:
+                if attempt == maxAttempts:
+                    raise
+
+                delay = 0.2 * (2 ** (attempt - 1))
+                self.log.warning(
+                    "Transient Supabase transport error while %s (attempt %s/%s): %s. Retrying in %.1fs.",
+                    description,
+                    attempt,
+                    maxAttempts,
+                    error,
+                    delay,
+                )
+                time.sleep(delay)
 
     def insertToDB(self, values, table: str = "Basic",  kwMatch: str ="photo_id"):
         try:
@@ -678,6 +707,9 @@ class SQLbuilder:
             if uploadIDs:
                 query = query.in_("upload_id", uploadIDs)
 
+            if mediaType == "videos":
+                query = query.or_("hide_video.eq.false,hide_video.is.null")
+
             result = query.execute()
                 
             rows = result.data or []
@@ -705,7 +737,114 @@ class SQLbuilder:
         except Exception as e:
             self.log.exception(f"Error occurred getting {mediaType}: {e}")
             return []
-        
+
+    def updateVideoMetadata(self, eventID: int, videoID: int, metadata: dict):
+        if not eventID or not videoID or not metadata:
+            return None
+
+        values = {
+            "duration_seconds": metadata.get("duration_seconds"),
+            "width": metadata.get("width"),
+            "height": metadata.get("height"),
+            "fps": metadata.get("fps"),
+            "thumbnail_path": metadata.get("thumbnail_path"),
+            "last_updated": datetime.now(timezone.utc).isoformat(),
+        }
+        if metadata.get("video_original_date"):
+            values["video_original_date"] = metadata["video_original_date"]
+
+        values = {key: value for key, value in values.items() if value is not None}
+
+        try:
+            result = (
+                self.client
+                .table("videos")
+                .update(values)
+                .eq("video_id", videoID)
+                .eq("event_id", eventID)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as error:
+            self.log.exception(
+                "Could not update metadata for video_id=%s event_id=%s: %s",
+                videoID,
+                eventID,
+                error,
+            )
+            return None
+
+    def updateUploadImageFormat(self,uploadID: int,blobName: str,filePath: str,fileSize: int):
+        if not uploadID or not blobName or not filePath or fileSize is None:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("uploads")
+                .update({
+                    "blob_name": blobName,
+                    "file_path": filePath,
+                    "mime_type": "image/jpeg",
+                    "file_size": int(fileSize),
+                })
+                .eq("upload_id", uploadID)
+                .execute()
+            )
+            return result.data[0] if result.data else None
+        except Exception as error:
+            self.log.exception(
+                "Could not update JPEG metadata for upload_id=%s: %s",
+                uploadID,
+                error,
+            )
+            return None
+
+    def getVideosForMetadataBackfill(self, offset: int = 0, limit: int = 100, videoID: int | None = None):
+        offset = max(int(offset or 0), 0)
+        limit = min(max(int(limit or 100), 1), 1000)
+
+        try:
+            query = (
+                self.client
+                .table("videos")
+                .select("""
+                    video_id,
+                    event_id,
+                    upload_id,
+                    duration_seconds,
+                    width,
+                    height,
+                    fps,
+                    thumbnail_path,
+                    video_original_date,
+                    uploads!inner(
+                        blob_name,
+                        file_path,
+                        original_file_name
+                    )
+                """)
+                .order("video_id")
+                .range(offset, offset + limit - 1)
+            )
+            if videoID is not None:
+                query = query.eq("video_id", int(videoID))
+
+            result = query.execute()
+            rows = []
+            for row in result.data or []:
+                upload = row.pop("uploads", None) or {}
+                if isinstance(upload, list):
+                    upload = upload[0] if upload else {}
+                row["blob_name"] = upload.get("blob_name")
+                row["file_path"] = upload.get("file_path")
+                row["original_file_name"] = upload.get("original_file_name")
+                rows.append(row)
+            return rows
+        except Exception as error:
+            self.log.exception("Could not load videos for metadata backfill: %s", error)
+            return []
+
     def insertPromptRequest(self, promptData: dict):
 
         if not promptData:
@@ -713,6 +852,36 @@ class SQLbuilder:
             return None
 
         try:
+            rawMood = str(promptData.get("mood") or "general").strip().lower()
+            normalizedMood = {
+                "fun": "energetic",
+                "excited": "energetic",
+                "exciting": "energetic",
+                "high energy": "energetic",
+                "upbeat": "energetic",
+            }.get(rawMood, rawMood)
+            allowedMoods = {
+                "romantic",
+                "happy",
+                "sentimental",
+                "energetic",
+                "calm",
+                "dramatic",
+                "nostalgic",
+                "funny",
+                "general",
+                "unknown",
+            }
+            if normalizedMood not in allowedMoods:
+                normalizedMood = "general"
+
+            if normalizedMood != rawMood:
+                self.log.info(
+                    "Normalized prompt mood from %r to %r",
+                    rawMood,
+                    normalizedMood,
+                )
+
             row = {
                 "event_id": promptData.get("event_id") or promptData.get("eventID"),
                 "user_id": promptData.get("user_id") or promptData.get("userID"),
@@ -723,7 +892,7 @@ class SQLbuilder:
                 "intent": promptData.get("intent", "unknown"),
                 "content_type": promptData.get("content_type", "Both"),
                 "theme": promptData.get("theme", "general"),
-                "mood": promptData.get("mood", "general"),
+                "mood": normalizedMood,
                 "event_type": promptData.get("event_type", "unknown"),
                 "timing_preference": promptData.get("timing_preference", "unknown"),
                 "music_preference": promptData.get("music_preference", "unknown"),
@@ -806,8 +975,8 @@ class SQLbuilder:
         result = {"photos": [], "videos": [], "photo_total": 0, "video_total": 0}
 
         if dataType in ["both", "photos"]:
-            photos = (
-                self.client
+            photos = self.executeWithRetry(
+                lambda: self.client
                 .table("photos")
                 .select(
                     """
@@ -852,7 +1021,8 @@ class SQLbuilder:
                 .eq("uploads.media_type", "photo")
                 .order("created_at", desc=True)
                 .range(offset, rangeEnd)
-                .execute()
+                .execute(),
+                "loading event photos",
             )
             photoRows = photos.data or []
             result["photo_total"] = int(photos.count or 0)
@@ -861,23 +1031,25 @@ class SQLbuilder:
             rankingByID = {}
             filterByID = {}
             if photoIDs:
-                filters = (
-                    self.client
+                filters = self.executeWithRetry(
+                    lambda: self.client
                     .table("photo_filter")
                     .select("photo_id,status,reason,user_approved,image_hash")
                     .in_("photo_id", photoIDs)
-                    .execute()
+                    .execute(),
+                    "loading photo filter results",
                 )
                 filterByID = {
                     row["photo_id"]: row
                     for row in filters.data or []
                 }
-                rankings = (
-                    self.client
+                rankings = self.executeWithRetry(
+                    lambda: self.client
                     .table("photo_ranking")
                     .select("photo_id,nudity_check")
                     .in_("photo_id", photoIDs)
-                    .execute()
+                    .execute(),
+                    "loading photo ranking results",
                 )
                 rankingByID = {
                     row["photo_id"]: row
@@ -895,8 +1067,8 @@ class SQLbuilder:
             result["photos"] = photoRows
             
         if dataType in ["both", "videos"]:
-            videos = (
-                self.client
+            videos = self.executeWithRetry(
+                lambda: self.client
                 .table("videos")
                 .select(
                     """
@@ -947,7 +1119,8 @@ class SQLbuilder:
                 .eq("uploads.media_type", "video")
                 .order("created_at", desc=True)
                 .range(offset, rangeEnd)
-                .execute()
+                .execute(),
+                "loading event videos",
             )
             result["videos"] = videos.data or []
             result["video_total"] = int(videos.count or 0)
@@ -1305,11 +1478,7 @@ class SQLbuilder:
             result = (
                 self.client
                 .table("storyboard_items")
-                .select(
-                    "storyboard_item_id, storyboard_id, photo_id, sequence_order, "
-                    "scene_label, confidence, reason, created_at, "
-                    "photos(upload_id, photo_taken, uploads(file_path, blob_name))"
-                )
+                .select("*")
                 .eq("storyboard_id", storyboardID)
                 .order("sequence_order", desc=False)
                 .execute()
@@ -1319,12 +1488,6 @@ class SQLbuilder:
             cleaned = []
 
             for row in rows:
-                photo = row.pop("photos", None) or {}
-                upload = photo.get("uploads") or {}
-
-                row["photo_taken"] = photo.get("photo_taken")
-                row["file_path"] = upload.get("file_path")
-                row["blob_name"] = upload.get("blob_name")
                 row["scene_label"] = row.get("scene_label") or "General Event Moment"
                 row["confidence"] = row.get("confidence") or 0
                 row["reason"] = row.get("reason") or ""
@@ -1731,7 +1894,7 @@ class SQLbuilder:
             photoResult = (self.client.table("photos")
                            .select("photo_id,event_id,upload_id,photo_taken,created_at")
                            .eq("event_id", eventID)
-                           .eq("hide_photo", False)
+                           .or_("hide_photo.eq.false,hide_photo.is.null")
                            .execute())
             photos = photoResult.data or []
 
@@ -1745,7 +1908,12 @@ class SQLbuilder:
                             .select("photo_id,status,reason,blur_score,bright_score,contrast_score,gps,image_hash,photo_original_date,camera_model,user_approved")
                             .in_("photo_id", photoIDs)
                             .execute())
-            approvedFilters = {row["photo_id"]: row for row in filterResult.data or [] if row.get("status") == "approved" or row.get("user_approved") is True}
+            approvedFilters = {
+                row["photo_id"]: row
+                for row in filterResult.data or []
+                if row.get("status") == "approved"
+                or row.get("user_approved") in (True, 1, "1")
+            }
 
             if not approvedFilters:
                 return []
@@ -2190,18 +2358,19 @@ class SQLbuilder:
             return []
 
         try:
-            result = (
-                self.client
-                .table("generated_videos")
-                .select(
-                    "gen_vid_id,event_id,music_id,title,"
-                    "file_name,file_path,video_type,status,"
-                    "duration_seconds,width,height,fps,file_size,"
-                    "created_at,last_updated"
-                )
-                .eq("event_id", eventID)
-                .order("created_at", desc=True)
-                .execute()
+            result = self.executeWithRetry(
+                lambda: self.client
+                    .table("generated_videos")
+                    .select(
+                        "gen_vid_id,event_id,music_id,title,"
+                        "file_name,file_path,video_type,status,"
+                        "duration_seconds,width,height,fps,file_size,"
+                        "created_at,last_updated"
+                    )
+                    .eq("event_id", eventID)
+                    .order("created_at", desc=True)
+                    .execute(),
+                f"loading generated videos for event_id={eventID}",
             )
 
             return result.data or []
@@ -2379,13 +2548,11 @@ class SQLbuilder:
                 .table("photos")
                 .update({
                     "hide_photo": True,
-                    "last_edit": (
-                        datetime.now(timezone.utc).isoformat()
-                    ),
+                    "last_edit": datetime.now(timezone.utc).isoformat(),
                 })
                 .eq("photo_id", photoID)
                 .eq("event_id", eventID)
-                .eq("hide_photo", False)
+                .or_("hide_photo.eq.false,hide_photo.is.null")
                 .execute()
             )
 
@@ -2395,6 +2562,34 @@ class SQLbuilder:
             self.log.exception(
                 "Could not hide photo_id=%s for event_id=%s",
                 photoID,
+                eventID,
+            )
+            return None
+
+    def hideVideo(self, eventID: int, videoID: int):
+        if not eventID or not videoID:
+            return None
+
+        try:
+            result = (
+                self.client
+                .table("videos")
+                .update({
+                    "hide_video": True,
+                    "last_updated": datetime.now(timezone.utc).isoformat(),
+                })
+                .eq("video_id", videoID)
+                .eq("event_id", eventID)
+                .or_("hide_video.eq.false,hide_video.is.null")
+                .execute()
+            )
+
+            return result.data[0] if result.data else None
+
+        except Exception:
+            self.log.exception(
+                "Could not hide video_id=%s for event_id=%s",
+                videoID,
                 eventID,
             )
             return None

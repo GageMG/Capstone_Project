@@ -1,30 +1,24 @@
 import logging
 import os
 import time
+from datetime import datetime, timedelta, timezone
 from logging.handlers import RotatingFileHandler
 from typing import List
-from datetime import datetime, timezone, timedelta
 from urllib.parse import unquote, urlparse
 
 import fastapi
 import jwt
 import uvicorn
-from fastapi import Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from api import (Auth, ChatBot, EventsClass, StoryBoard, Uploads, UserClass,
+                 qrGen)
+from fastapi import (Depends, File, Form, HTTPException, Query, Request,
+                     UploadFile, status)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import OAuth2PasswordBearer
 from fastapi.responses import JSONResponse
-
-from api import Auth
-from api import ChatBot
-from api import EventsClass
-from api import qrGen
-from api import StoryBoard
-from api import Uploads
-from api import UserClass
-
+from fastapi.security import OAuth2PasswordBearer
+from shared import DataStruct as dc
 from shared.AzureClass import blobHandler
 from shared.DBConn import SQLbuilder
-from shared import DataStruct as dc
 
 APP_ENV = os.getenv("APP_ENV", "development").lower().strip()
 IS_PRODUCTION = APP_ENV == "production"
@@ -79,6 +73,7 @@ uploadManager = Uploads.UploadManager(db=db, blob=blob, logger=logger)
 
 ALLOWED_ORIGINS = [
     "https://zealous-stone-0f78c580f.7.azurestaticapps.net",
+    'https://purple-pebble-08579aa10.7.azurestaticapps.net',
     "http://localhost:8081",
     "http://localhost:3000",
     "http://localhost:5173",
@@ -210,11 +205,15 @@ def verifyEventOwner(eventID: int, current_user_id: int) -> dict:
 
     return event
 
-def verifyGuestQRCode(eventID: int, qrToken: str):
+def verifyGuestQRCode(eventID: int, qrToken: str, enforceUploadLimit: bool = True):
     if not qrToken:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail="QR token is required.")
 
-    valid, reason = qrCode.validateQRcode(eventID=eventID, token=qrToken)
+    valid, reason = qrCode.validateQRcode(
+        eventID=eventID,
+        token=qrToken,
+        enforceUploadLimit=enforceUploadLimit,
+    )
 
     if not valid:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN,detail=reason or "Invalid or expired QR code.")
@@ -235,6 +234,14 @@ def userOwnsLocation(location: dict, current_user_id: int) -> bool:
  
     owner_id = event.get("user_id") or event.get("owner_id")
     return owner_id == current_user_id
+
+def blobNameFromStoredPath(storedPath: str | None) -> str | None:
+    if not storedPath:
+        return None
+
+    path = unquote(urlparse(storedPath).path).lstrip("/")
+    containerPrefix = f"{blob.container}/"
+    return path[len(containerPrefix):] if path.startswith(containerPrefix) else path
 
 def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
     upload = item.get("uploads") or {}
@@ -285,6 +292,10 @@ def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
             "image_hash": item.get("image_hash"),
         })
     else:
+        signed_thumbnail = blob.getSignedBlobUrl(
+            blobNameFromStoredPath(item.get("thumbnail_path")),
+            expiresInMinutes=15,
+        )
         normalized.update({
             "title": item.get("title"),
             "status": item.get("status"),
@@ -292,6 +303,8 @@ def normalizeMediaRecord(item: dict, mediaType: str) -> dict:
             "width": item.get("width"),
             "height": item.get("height"),
             "fps": item.get("fps"),
+            "thumbnail_url": signed_thumbnail["url"] if signed_thumbnail else None,
+            "thumbnail_url_expires_at": signed_thumbnail["expires_at"] if signed_thumbnail else None,
             "last_updated": item.get("last_updated"),
         })
 
@@ -514,7 +527,13 @@ async def createQR(req: dc.QRRequest,current_user_id: int = Depends(getCurrentUs
 @app.post('/qr/validate')
 async def validateQR(req: dc.validateToken, request: Request ):
     checkRateLimit(f"qr_validate:{getClientIp(request)}", maxCall= 20, windowSec=6)
-    verifyGuestQRCode(req.event_id, req.token)
+    verifyGuestQRCode(req.event_id, req.token, enforceUploadLimit=False)
+
+    can_upload, upload_reason = qrCode.validateQRcode(
+        eventID=req.event_id,
+        token=req.token,
+        enforceUploadLimit=True,
+    )
 
     event = ev.getEventByID(req.event_id)
 
@@ -523,6 +542,8 @@ async def validateQR(req: dc.validateToken, request: Request ):
     "event_name": event.get("name") if event else None,
     "valid": True,
     "reason": "QR code is valid.",
+    "can_upload": can_upload,
+    "upload_reason": None if can_upload else upload_reason,
 }
 
 #API endpoint for the upload function
@@ -577,17 +598,216 @@ async def analyzePrompt(request: dc.PromptRequest, current_user_id: int = Depend
     checkRateLimit(f"prompt_analyze:{current_user_id}", maxCall=20, windowSec=3600)
     try:
         verifyEventOwner(request.eventID, current_user_id)
+        eventContext = db.getEventByID(request.eventID) or {}
         bot = ChatBot.chatBotOpenAI(logger)
-        result = bot.getResponse(request.prompt)
+        history = [message.model_dump() for message in request.history]
+        result = bot.getResponse(request.prompt, history, eventContext)
 
         if not isinstance(result, dict):
             return {
-                "allowed": False,
-                "out_of_scope": False,
-                "unsafe_or_invalid": True,
-                "reason": "The prompt analyzer returned data that was not a JSON object.",
-                "response": "Sorry, I could not understand that request."
+                "event_id": request.eventID,
+                "user_id": current_user_id,
+                "guest_id": request.guestID,
+                "inserted": [],
+                "analysis": {
+                    "action": "reject",
+                    "follow_up_question": None,
+                    "allowed": False,
+                    "out_of_scope": False,
+                    "unsafe_or_invalid": True,
+                    "reason": "The prompt analyzer returned data that was not a JSON object.",
+                    "response": "Sorry, I could not understand that request."
+                }
             }
+
+        action = str(result.get("action") or "").strip().lower()
+        actionAliases = {
+            "follow up": "clarify",
+            "follow-up": "clarify",
+            "follow up question": "clarify",
+            "follow_up_question": "clarify",
+            "question": "clarify",
+        }
+        action = actionAliases.get(action, action)
+
+        userConversation = " ".join(
+            [
+                *[
+                    str(message.get("content") or "")
+                    for message in history
+                    if str(message.get("role") or "").lower() == "user"
+                ],
+                request.prompt,
+            ]
+        ).lower()
+        hasCreationRequest = any(
+            phrase in userConversation
+            for phrase in (
+                "slideshow",
+                "slide show",
+                "video",
+                "recap",
+                "highlight",
+            )
+        )
+        hasUsefulDirection = any(
+            phrase in userConversation
+            for phrase in (
+                "all ",
+                "night",
+                "photo",
+                "videos",
+                "fun",
+                "excited",
+                "exciting",
+                "energetic",
+                "calm",
+                "romantic",
+                "sentimental",
+                "dramatic",
+                "nostalgic",
+                "professional",
+                "fast",
+                "slow",
+            )
+        )
+
+        if result.get("out_of_scope") or result.get("unsafe_or_invalid"):
+            action = "reject"
+        elif hasCreationRequest and hasUsefulDirection:
+            action = "create"
+        elif action not in {"create", "clarify", "reject"}:
+            action = (
+                "clarify"
+                if str(result.get("follow_up_question") or "").strip()
+                else "create"
+            )
+
+        rawContentType = str(result.get("content_type") or "Both").strip().lower()
+        result["content_type"] = {
+            "photo only": "Photo Only",
+            "photos only": "Photo Only",
+            "photos": "Photo Only",
+            "video only": "Videos Only",
+            "videos only": "Videos Only",
+            "videos": "Videos Only",
+            "both": "Both",
+            "photos and videos": "Both",
+            "videos and photos": "Both",
+        }.get(rawContentType, "Both")
+
+        rawTheme = str(result.get("theme") or "general").strip().lower()
+        result["theme"] = {
+            "fun": "celebration",
+            "happy": "celebration",
+            "excited": "celebration",
+            "exciting": "celebration",
+            "energetic": "celebration",
+            "party": "celebration",
+        }.get(rawTheme, rawTheme)
+        if result["theme"] not in {
+            "romance",
+            "friendship",
+            "family",
+            "celebration",
+            "professional",
+            "funny",
+            "emotional",
+            "general",
+            "unknown",
+        }:
+            result["theme"] = "general"
+
+        rawMood = str(result.get("mood") or "general").strip().lower()
+        result["mood"] = {
+            "fun": "energetic",
+            "excited": "energetic",
+            "exciting": "energetic",
+            "high energy": "energetic",
+            "upbeat": "energetic",
+        }.get(rawMood, rawMood)
+        if result["mood"] not in {
+            "romantic",
+            "happy",
+            "sentimental",
+            "energetic",
+            "calm",
+            "dramatic",
+            "nostalgic",
+            "funny",
+            "general",
+            "unknown",
+        }:
+            result["mood"] = "general"
+
+        eventType = str(eventContext.get("type") or result.get("event_type") or "unknown").strip().lower()
+        result["event_type"] = (
+            eventType
+            if eventType
+            in {
+                "wedding",
+                "birthday",
+                "graduation",
+                "concert",
+                "sports",
+                "corporate",
+                "general",
+                "unknown",
+            }
+            else "general"
+        )
+
+        timingPreference = str(
+            result.get("timing_preference") or "unknown"
+        ).strip().lower()
+        result["timing_preference"] = (
+            timingPreference
+            if timingPreference in {"slow", "medium", "fast", "unknown"}
+            else "unknown"
+        )
+
+        musicPreference = str(
+            result.get("music_preference") or "unknown"
+        ).strip().lower()
+        result["music_preference"] = {
+            "excited": "fun",
+            "exciting": "fun",
+            "energetic": "fun",
+            "happy": "fun",
+        }.get(musicPreference, musicPreference)
+        if result["music_preference"] not in {
+            "romantic",
+            "upbeat",
+            "calm",
+            "dramatic",
+            "fun",
+            "none",
+            "unknown",
+        }:
+            result["music_preference"] = "unknown"
+
+        if action == "clarify":
+            followUpQuestion = str(
+                result.get("follow_up_question")
+                or result.get("response")
+                or "What mood or style would you like for the slideshow?"
+            ).strip()
+            result["follow_up_question"] = followUpQuestion
+            result["response"] = followUpQuestion
+            result["allowed"] = False
+        elif action == "create":
+            result["follow_up_question"] = None
+            result["allowed"] = True
+            intent = str(result.get("intent") or "create an event video").strip()
+            result["response"] = (
+                f"Your plan to {intent.rstrip('.')} is ready. "
+                "Select Create Video below to begin."
+            )
+        else:
+            result["follow_up_question"] = None
+            result["allowed"] = False
+
+        result["action"] = action
 
         result["event_id"] = request.eventID
         result["user_id"] = current_user_id
@@ -595,12 +815,38 @@ async def analyzePrompt(request: dc.PromptRequest, current_user_id: int = Depend
         result["original_prompt"] = request.prompt
 
         inserted = db.insertPromptRequest(result)
+        insertedRows = (
+            inserted
+            if isinstance(inserted, list)
+            else [inserted]
+            if isinstance(inserted, dict)
+            else []
+        )
+        promptRequestID = int(
+            (insertedRows[0] if insertedRows else {}).get("prompt_request_id")
+            or 0
+        )
+
+        if promptRequestID <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="The video plan was analyzed but could not be saved.",
+            )
+
+        canCreate = (
+            action == "create"
+            and result.get("allowed") is True
+            and not result.get("out_of_scope")
+            and not result.get("unsafe_or_invalid")
+        )
 
         return {
             "event_id": request.eventID,
             "user_id": current_user_id,
             "guest_id": request.guestID,
             "inserted": inserted,
+            "prompt_request_id": promptRequestID,
+            "can_create": canCreate,
             "analysis": result
         }
 
@@ -778,6 +1024,77 @@ def getEventMedia(eventID: int, dataType: str = "both", limit: int = Query(defau
             detail="Event media could not be loaded.",
         ) from e
 
+@app.get("/events/{eventID}/guest-media")
+def getGuestEventMedia(eventID: int,qrToken: str,request: Request,limit: int = Query(default=60, ge=1, le=100),offset: int = Query(default=0, ge=0),):
+    checkRateLimit(f"guest_media:{getClientIp(request)}:{hash(qrToken)}",maxCall=120,windowSec=3600,)
+    verifyGuestQRCode(eventID, qrToken, enforceUploadLimit=False)
+
+    try:
+        media = db.getAllMedia(eventID=eventID,dataType="both",limit=limit,offset=offset)
+        visible_photos = []
+        visible_videos = []
+
+        for item in media["photos"]:
+            filter_status = str(item.get("filter_status") or "").strip().lower()
+            user_approved = item.get("user_approved") in (True, 1, "1")
+            if filter_status != "approved" and not user_approved:
+                continue
+
+            normalized = normalizeMediaRecord(item, "photo")
+            if not normalized.get("display_url"):
+                continue
+
+            visible_photos.append({
+                "id": normalized["id"],
+                "event_id": eventID,
+                "display_url": normalized["display_url"],
+                "display_url_expires_at": normalized["display_url_expires_at"],
+                "created_at": normalized["created_at"],
+                "nudity_check": normalized.get("nudity_check", False),
+            })
+
+        for item in media["videos"]:
+            video_status = str(item.get("status") or "").strip().lower()
+            if video_status in {"failed", "rejected"}:
+                continue
+
+            normalized = normalizeMediaRecord(item, "video")
+            if not normalized.get("display_url"):
+                continue
+
+            visible_videos.append({
+                "id": normalized["id"],
+                "event_id": eventID,
+                "display_url": normalized["display_url"],
+                "display_url_expires_at": normalized["display_url_expires_at"],
+                "created_at": normalized["created_at"],
+                "title": normalized.get("title") or normalized.get("original_file_name") or "Event video",
+                "duration_seconds": normalized.get("duration_seconds"),
+                "status": normalized.get("status"),
+            })
+
+        raw_photo_count = len(media["photos"])
+        raw_video_count = len(media["videos"])
+        next_offset = offset + max(raw_photo_count, raw_video_count)
+
+        return {
+            "event_id": eventID,
+            "photos": visible_photos,
+            "videos": visible_videos,
+            "photo_count": len(visible_photos),
+            "video_count": len(visible_videos),
+            "next_offset": next_offset,
+            "has_more_photos": offset + raw_photo_count < media["photo_total"],
+            "has_more_videos": offset + raw_video_count < media["video_total"],
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST,detail=str(e),) from e
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Error getting guest media for event_id={eventID}")
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,detail="The guest album could not be loaded.") from e
+
 @app.patch("/events/modify/{eventID}")
 def modifyEvent(eventID: int, event: dc.eventModify, current_user_id: int = Depends(getCurrentUserID)):
     verifyEventOwner(eventID, current_user_id)
@@ -870,12 +1187,27 @@ async  def createStoryBoard(req: dc.StoryboardCreateRequest , current_user_id: i
     try:
 
         verifyEventOwner(req.event_id, current_user_id)
+
+        if not req.request_id:
+            raise HTTPException(status_code=400,detail="A prompt request is required before creating a storyboard.")
+
+        prompt = db.getPromptRequestByID(req.request_id)
+        if not prompt:
+            raise HTTPException(status_code=404,detail="Prompt request not found.")
+        if int(prompt.get("event_id") or 0) != req.event_id:
+            raise HTTPException(status_code=400,detail="The prompt request does not belong to this event.")
+        if not prompt.get("allowed", False):
+            raise HTTPException(status_code=409,detail="This prompt needs clarification before a video can be created.")
+
         sb = StoryBoard.StoryBoardGen(db=db, log=logger)
 
         res = sb.createStoryboardForEvent(req.event_id, req.request_id)
         
         if not res:
-            raise HTTPException(status_code=404,detail="Storyboard could not be created. No approved photos may exist for this event.")
+            raise HTTPException(
+                status_code=409,
+                detail="No eligible media is available. Wait for photo processing to finish or approve photos for the slideshow in the gallery."
+            )
 
         storyboard = res.get("storyboard")
         items = res.get("items", [])
@@ -993,6 +1325,25 @@ def hideEventPhoto(eventID: int,photoID: int,current_user_id: int = Depends(getC
         "message": "Photo removed from the gallery.",
         "event_id": eventID,
         "photo_id": photoID,
+        "hidden": True,
+    }
+
+@app.delete("/events/{eventID}/videos/{videoID}")
+def hideEventVideo(eventID: int,videoID: int,current_user_id: int = Depends(getCurrentUserID)):
+    verifyEventOwner(eventID, current_user_id)
+
+    hidden = db.hideVideo(
+        eventID=eventID,
+        videoID=videoID,
+    )
+
+    if not hidden:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,detail="Video was not found or is already hidden.")
+
+    return {
+        "message": "Video removed from the gallery.",
+        "event_id": eventID,
+        "video_id": videoID,
         "hidden": True,
     }
 

@@ -28,6 +28,8 @@ type EventRecord = {
 };
 type EventsResponse = { events: EventRecord[] };
 type PromptResponse = {
+  prompt_request_id?: number | null;
+  can_create?: boolean;
   inserted:
     | boolean
     | { prompt_request_id?: number | string }
@@ -49,6 +51,7 @@ type Message = {
   requestId?: number | null;
   jobId?: number;
   jobStatus?: "queued" | "processing" | "completed" | "failed";
+  generatedVideoId?: number;
 };
 
 type CreateVideoResponse = {
@@ -66,6 +69,16 @@ type VideoJobResponse = {
   error_message: string | null;
   started_at: string | null;
   finished_at: string | null;
+};
+
+type GeneratedVideoRecord = {
+  gen_vid_id: number;
+  status: string;
+  created_at: string | null;
+};
+
+type GeneratedVideosResponse = {
+  videos: GeneratedVideoRecord[];
 };
 
 const INTRO: Message = {
@@ -159,6 +172,35 @@ export default function ChatbotScreen() {
         const status = job.status.toLowerCase();
 
         if (["completed", "complete", "success"].includes(status)) {
+          try {
+            const generated = await apiFetch<GeneratedVideosResponse>(
+              `/events/${eventId}/generated-videos`
+            );
+            const generatedVideoId = generated.videos
+              ?.filter(
+                (video) =>
+                  video.status === "completed" &&
+                  Number.isInteger(video.gen_vid_id) &&
+                  video.gen_vid_id > 0
+              )
+              .sort((left, right) => {
+                const leftCreated = Date.parse(left.created_at ?? "") || 0;
+                const rightCreated = Date.parse(right.created_at ?? "") || 0;
+                return rightCreated - leftCreated || right.gen_vid_id - left.gen_vid_id;
+              })[0]?.gen_vid_id;
+
+            if (generatedVideoId) {
+              updateJobMessage(messageId, {
+                text: "Your generated video is ready.",
+                jobStatus: "completed",
+                generatedVideoId,
+              });
+              return;
+            }
+          } catch {
+            // Fall back to the event gallery if refreshing the video list fails.
+          }
+
           updateJobMessage(messageId, {
             text: "Your generated video is ready. Open the event’s Generated tab to watch or download it.",
             jobStatus: "completed",
@@ -247,11 +289,20 @@ export default function ChatbotScreen() {
         : typeof result.inserted === "object" && result.inserted !== null
           ? result.inserted
           : null;
-      const requestId = Number(insertedRow?.prompt_request_id);
+      const requestId = Number(
+        result.prompt_request_id ?? insertedRow?.prompt_request_id
+      );
+      const replyStartsCreate = reply
+        .trim()
+        .toLowerCase()
+        .startsWith("crea");
       const isCreateAction =
+        result.can_create === true ||
         action === "create" ||
+        replyStartsCreate ||
         (!action && result.analysis?.allowed === true && !isClarification);
       const canCreateVideo =
+        result.can_create !== false &&
         isCreateAction &&
         result.analysis?.allowed !== false &&
         Number.isInteger(requestId) &&
@@ -426,6 +477,22 @@ export default function ChatbotScreen() {
                       </Text>
                     </View>
                   ) : null}
+                  {message.jobStatus === "completed" &&
+                  message.eventId &&
+                  message.generatedVideoId ? (
+                    <TouchableOpacity
+                      accessibilityRole="link"
+                      style={styles.openVideoButton}
+                      onPress={() =>
+                        router.push(
+                          `/events/${message.eventId}/videos/${message.generatedVideoId}`
+                        )
+                      }
+                    >
+                      <Ionicons name="play-circle" size={18} color="#fff" />
+                      <Text style={styles.openVideoText}>WATCH VIDEO</Text>
+                    </TouchableOpacity>
+                  ) : null}
                   {message.canCreateVideo ? (
                     <TouchableOpacity
                       style={styles.createVideoButton}
@@ -560,6 +627,23 @@ const makeStyles = (c: ThemeColors) => {
       fontSize: 10,
       fontWeight: "800",
       letterSpacing: 1.1,
+    },
+    openVideoButton: {
+      minHeight: 42,
+      marginTop: 12,
+      borderRadius: 11,
+      backgroundColor: "#7C3AED",
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 7,
+      paddingHorizontal: 13,
+    },
+    openVideoText: {
+      color: "#fff",
+      fontSize: 11,
+      fontWeight: "800",
+      letterSpacing: 1.2,
     },
     typingBubble: { flexDirection: "row", alignItems: "center", gap: 9 },
     typingText: { color: c.textMuted, fontSize: 13 },
