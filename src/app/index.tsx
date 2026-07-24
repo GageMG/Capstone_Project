@@ -7,6 +7,7 @@ import { Redirect, router, useLocalSearchParams } from "expo-router";
 import { useMemo, useState } from "react";
 import {
   Alert,
+  Image,
   KeyboardAvoidingView,
   Platform,
   StatusBar,
@@ -256,7 +257,14 @@ export default function WelcomeScreen() {
       >
         {/* Header */}
         <View style={styles.header}>
-          <Text style={styles.logoMark}>◆</Text>
+          <View style={styles.brandPanel}>
+            <Image
+              source={require("../../assets/images/event-lens-logo.png")}
+              style={styles.brandLogo}
+              resizeMode="contain"
+              accessibilityLabel="Event Lens — AI-Powered Event Photo Sharing Platform"
+            />
+          </View>
           <Text style={styles.title}>Welcome!</Text>
           <Text style={styles.subtitle}>Sign in to continue</Text>
         </View>
@@ -434,10 +442,24 @@ const makeStyles = (c: ThemeColors) =>
       marginBottom: 36,
       paddingLeft: 4,
     },
-    logoMark: {
-      fontSize: 22,
-      color: c.accentStrong,
-      marginBottom: 16,
+    brandPanel: {
+      width: "100%",
+      maxWidth: 460,
+      height: 112,
+      justifyContent: "center",
+      alignItems: "center",
+      alignSelf: "flex-start",
+      marginBottom: 18,
+      paddingHorizontal: 14,
+      paddingVertical: 10,
+      backgroundColor: "#FFFFFF",
+      borderWidth: 1,
+      borderColor: c.border,
+      borderRadius: 16,
+    },
+    brandLogo: {
+      width: "100%",
+      height: "100%",
     },
     title: {
       fontSize: 38,
